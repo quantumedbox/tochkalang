@@ -1,4 +1,4 @@
-import lex
+import lexer, language
 
 # todo: we can store current 'repr' not as separate string sequences, but range of source
 #       this way we can get rid of lots of memory allocs/reallocs
@@ -15,11 +15,6 @@ import lex
 
 # todo: project is strangely structured, there should be a file for language definitions,
 #       another for lexer utils and another for lex parsing
-
-const
-  Keywords = ["proc", "scope", "mut", "type", "cond"] # should only consist of isLetter chars
-  ExportMarker = '*'
-  StringMarkers = {'"'}
 
 
 # todo: make macro from this
