@@ -1,4 +1,5 @@
 import lexer, language
+export lexer
 
 # todo: we can store current 'repr' not as separate string sequences, but range of source
 #       this way we can get rid of lots of memory allocs/reallocs
@@ -9,23 +10,26 @@ import lexer, language
 #       to get the actual typed value, we always could implement tokens as tagged unions of course
 #       and store hint for future after lexing
 
-# todo: specify errors on erroneous lex return for future displaying
+# todo: specify descriptive error text on erroneous lex return for future displaying
 
 # todo: make 'repr' of tokens as optional value of 'tvString'
 
-# todo: project is strangely structured, there should be a file for language definitions,
-#       another for lexer utils and another for lex parsing
+# todo: make use of parseutils
+
+# todo: do we need to keep info about spaces? or guess it from context
+
+# todo: make export maker its own token for ease of parsing
 
 
 # todo: make macro from this
-proc lexAny(p: Lexer, list: varargs[proc(p: Lexer): Token {.nimcall, gcsafe.}]): Token {.inline.} =
+func lexAny(p: Lexer, list: varargs[proc(p: Lexer): Token {.nimcall, gcsafe, noSideEffect.}]): Token {.inline.} =
   for fn in list:
     result = p.fn
     if result.valid: break
 
 
 # todo: works, but not sure about that, could be clearer
-proc lexIdent(p: Lexer): Token =
+func lexIdent(p: Lexer): Token =
   if p.current.isLetter:
     var future: int
     for ch in p.stream:
@@ -35,61 +39,71 @@ proc lexIdent(p: Lexer): Token =
         if ch == ExportMarker:
           future.inc
         break
-    Token(kind: tkIdent, repr: p.futureSlice(future))
+    p.viewToken(tkIdent, future)
+    # Token(kind: tkIdent, repr: p.futureSlice(future))
   else:
     Token(kind: tkError)
 
 
-proc lexKeyword(p: Lexer): Token =
+func lexKeyword(p: Lexer): Token =
   var future: int
   for ch in p.stream:
     if not ch.isLetter: break
     future.inc
-  let parsed = p.futureSlice(future)
-  for keyword in Keywords:
-    if keyword == parsed:
-      return Token(kind: tkKeyword, repr: parsed)
+  for keyword in ReservedWords:
+    # if p.view(future) == keyword.toOpenArray(keyword.low, keyword.high):
+    if toOpenArray(p.source, p.cursor, p.cursor + future) == keyword.toOpenArray(keyword.low, keyword.high):
+      return Token(kind: tkKeyword)
   Token(kind: tkError)
 
 
-proc lexString(p: Lexer): Token =
+func lexString(p: Lexer): Token =
   if p.current in StringMarkers:
     var future = 1
     for cur in p.stream(p.nextCursor):
       if cur == EndChar: break # no enclosing marker encountered
       future.inc
       if cur in StringMarkers:
-        return Token(kind: tkValue, repr: p.futureSlice(future))
+        # return Token(kind: tkValue, repr: p.futureSlice(future))
+        return p.viewToken(tkValue, future)
   Token(kind: tkError)
 
 
-proc lexInt(p: Lexer): Token =
+func lexInt(p: Lexer): Token =
   if p.current.isNumber:
     var future: int
     for ch in p.stream:
       if ch.isNumber:
         future.inc
       else: break
-    Token(kind: tkValue, repr: p.futureSlice(future))
+    p.viewToken(tkValue, future)
+    # Token(kind: tkValue, repr: p.futureSlice(future))
   else:
     Token(kind: tkError)
 
 
-proc lexSpecialChars(p: Lexer): Token =
+# todo: maybe create unified definition for all such symbols?
+func lexSpecialChars(p: Lexer): Token =
   case p.current:
+  of '.':
+    Token(kind: tkDot)
   of '=':
     Token(kind: tkAssign)
   of ':':
     Token(kind: tkColon)
+  of '[':
+    Token(kind: tkListOpen)
+  of ']':
+    Token(kind: tkListClose)
   else:
     Token(kind: tkError)
 
 
-proc lexValue(p: Lexer): Token =
+func lexValue(p: Lexer): Token =
   p.lexAny(lexInt, lexString)
 
 
-proc lexModule(p: var Lexer) =
+func lexModule*(p: var Lexer) =
   while not p.atEnd:
     let tok = p.lexAny(lexKeyword, lexIdent, lexValue, lexSpecialChars)
     if tok.valid:
@@ -97,9 +111,3 @@ proc lexModule(p: var Lexer) =
       p.eatSpace
     else:
       raise newException(LexerError, "unknown token")
-
-
-let src = stdin.readAll
-var p = initLexer(src, lexModule)
-if p.tokenize:
-  echo $p

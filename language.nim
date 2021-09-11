@@ -2,6 +2,7 @@
 
 type
   TokenKind* = enum
+    tkNone,
     tkError,                    # Signal for caller that parsing wasn't successful
     tkIdent,                    # Literal symbol
     tkValue,                    # Any value that is known without context
@@ -17,8 +18,8 @@ const
   EndChar* = '\0' # todo: not sure about char choise, maybe unicode has something for that
   IndentChar* = ' '
   IndentTemplate* = "  "
-  SpecialCharTokens* = {tkDot, tkAssign, tkColon}
+  SpecialCharTokens* = {tkDot, tkAssign, tkColon, tkListOpen, tkListClose}
 
-  Keywords* = ["proc", "scope", "mut", "type", "cond"] # should only consist of isLetter chars
+  ReservedWords* = ["proc", "mut", "type", "cond"] # should only consist of isLetter chars
   ExportMarker* = '*'
   StringMarkers* = {'"'}
