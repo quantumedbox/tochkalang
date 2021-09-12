@@ -19,8 +19,8 @@ type
 
   AstNode* = object
     kind*: AstKind
-    cursor*: int    # Position in source
-    size*: int      # Size starting from cursor position
+    head*: int      # Beginning in source
+    tail*: int      # End in source
     # Each side holds an offset in shared node sequence
     # By limiting each node to only hold certain amount of other nodes
     # we can potentially don't allocate any extra heap data
@@ -31,17 +31,19 @@ type
     # Main idea behind this implementation is to achieve cache locality
     # by utilizing single buffer for all ast nodes and make them reference
     # each other by buffer offset instead of pointers to heap allocated space
+    source*: string
     nodes*: seq[AstNode]
-    tokens: seq[Token]
+    tokens*: seq[Token]
     cursor*: int # Position in tokens
-    astfun*: proc(s: var AstState)
-    inplace*: seq[AstNode]
+    astfun: proc(s: var AstState)
+    # inplace*: seq[AstNode]
 
   GrammarError* = object of CatchableError
 
 
-func initAstState*(toks: seq[Token], fn: proc(s: var AstState)): AstState =
-  AstState(tokens: toks, astfun: fn)
+func initAstState*(source: string, toks: seq[Token], fn: proc(s: var AstState)): AstState =
+  result = AstState(tokens: toks, astfun: fn)
+  shallowCopy result.source, source
 
 
 proc parse*(s: var AstState): bool =
