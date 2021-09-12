@@ -13,16 +13,15 @@ export lexer
 
 # todo: maybe it is possible to parse idents and keywords at the same func?
 
+# todo: it's possible for tkNewIndent to have no additional attached data as indentation
+#       might be written in vacant 'head' or 'tail' fields which aren't used
 
-# todo: make macro from this
-func lexAny(x: Lexer, list: varargs[LexerFunc]): LexerReturn {.inline.} =
-  for fn in list:
-    result = x.fn
-    if result.tok.valid: break
+# todo: should all tokens store their position in source? it might be helpful for constructing
+#       some debugging information, ast trees then could infer to source range
 
 
 # todo: works, but not sure about that, could be clearer
-func lexIdent(x: Lexer): LexerReturn =
+func lexIdent(x: Lexer): LexRet =
   if x.current.isLetter:
     var future: int
     for ch in x.stream:
@@ -33,12 +32,11 @@ func lexIdent(x: Lexer): LexerReturn =
           future.inc
         break
     (x.viewToken(tkIdent, future), future)
-    # Token(kind: tkIdent, repr: x.futureSlice(future))
   else:
     (Token(kind: tkError), 0)
 
 
-func lexKeyword(x: Lexer): LexerReturn =
+func lexKeyword(x: Lexer): LexRet =
   var future: int
   for ch in x.stream:
     if not ch.isLetter: break
@@ -49,27 +47,25 @@ func lexKeyword(x: Lexer): LexerReturn =
   (Token(kind: tkError), 0)
 
 
-func lexString(x: Lexer): LexerReturn =
-  if x.current in StringMarkers:
+func lexString(x: Lexer): LexRet =
+  if x.current == StringMarker:
     var future = 1
-    for cur in x.stream(x.nextCursor):
+    for cur in x.stream(x.cursor + 1):
       if cur == EndChar: break # no enclosing marker encountered
       future.inc
-      if cur in StringMarkers:
-        # return Token(kind: tkValue, repr: x.futureSlice(future))
-        return (x.viewToken(tkValue, future), future)
+      if cur == StringMarker:
+        return (x.viewToken(tkString, future), future)
   (Token(kind: tkError), 0)
 
 
-func lexInt(x: Lexer): LexerReturn =
+func lexInt(x: Lexer): LexRet =
   if x.current.isNumber:
     var future: int
     for ch in x.stream:
       if ch.isNumber:
         future.inc
       else: break
-    (x.viewToken(tkValue, future), future)
-    # Token(kind: tkValue, repr: x.futureSlice(future))
+    (x.viewToken(tkInt, future), future)
   else:
     (Token(kind: tkError), 0)
 
@@ -80,7 +76,7 @@ func lexInt(x: Lexer): LexerReturn =
 #   tkDot: '.',
 #   tkAssign: '=',
 #   ...
-func lexSymbol(x: Lexer): LexerReturn =
+func lexSymbol(x: Lexer): LexRet =
   let kind = case x.current:
     of '.': tkDot
     of '=': tkAssign

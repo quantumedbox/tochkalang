@@ -2,10 +2,12 @@ import std/[strutils, macros]
 
 type
   TokenKind* = enum
-    tkNone,
+    tkNone,                     # Default for not triggering error by clear initialization
     tkError,                    # Signal for caller that parsing wasn't successful
     tkIdent,                    # Literal symbol
-    tkValue,                    # Any value that is known without context
+    # tkValue,                    # Any value that is known without context
+    tkInt,
+    tkString,
     tkKeyword,                  # Literal symbol protected from being an tkIdent
     tkDot,                      # '.'
     tkAssign,                   # '='
@@ -33,39 +35,38 @@ type
     lineno*: int
     indent*: int
     tokens*: seq[Token]
-    # lexfun: proc(x: var Lexer)
 
-  LexerReturn* = tuple[tok: Token, progress: int]
-  LexerFunc* = proc(x: Lexer): LexerReturn {.nimcall, noSideEffect.}
-  LexerError* = object of CatchableError
+  LexRet* = tuple[tok: Token, progress: int]
+  LexDef* = proc(x: Lexer): LexRet {.nimcall, noSideEffect.}
+  LexError* = object of CatchableError
 
 
 const
   EndChar* = '\0' # todo: not sure about char choise, maybe unicode has something for that
   IndentChar* = ' '
-  SpecialCharTokens* = {tkDot, tkAssign, tkColon, tkListOpen, tkListClose}
 
+  # todo: all reserved words should be their own token
   ReservedWords* = ["mut", "type", "cond"] # should only consist of isLetter chars
   ExportMarker* = '*'
-  StringMarkers* = {'"'}
+  StringMarker* = '"'
 
 
-func lexRuleUnify*(x: LexerFunc): seq[LexerFunc] = result.add x
-func lexRuleUnify*[ix: static int](arr: array[ix, LexerFunc]): seq[LexerFunc] =
+func lexRuleUnify*(x: LexDef): seq[LexDef] = result.add x
+func lexRuleUnify*[ix: static int](arr: array[ix, LexDef]): seq[LexDef] =
   for x in arr: result.add x
-template lexRule*(feed: varargs[seq[LexerFunc], lexRuleUnify]): auto =
+template lexRule*(feed: varargs[seq[LexDef], lexRuleUnify]): auto =
   const procs = static:
-    var inline: seq[LexerFunc]
+    var inline: seq[LexDef]
     for x in feed:
       for y in x:
         if y notin inline:
           inline.add y
     inline
   const result = static:
-    var inplace: array[procs.len, LexerFunc]
+    var emplace: array[procs.len, LexDef]
     for i, x in procs:
-      inplace[i] = x
-    inplace
+      emplace[i] = x
+    emplace
   result
 
 
@@ -81,8 +82,8 @@ func addToken*(x: var Lexer, tok: Token) {.inline.} =
   x.tokens.add tok
 
 
-func nextCursor*(x: Lexer): int {.inline.} =
-  x.cursor + 1
+# func nextCursor*(x: Lexer): int {.inline.} =
+#   x.cursor + 1
 
 
 func current*(x: Lexer): char {.inline.} =
@@ -91,7 +92,7 @@ func current*(x: Lexer): char {.inline.} =
 
 func next*(x: Lexer): char {.inline.} =
   if not x.atEnd:
-    x.source[x.nextCursor]
+    x.source[x.cursor + 1]
   else:
     EndChar
 
@@ -116,10 +117,6 @@ func isNumber*(c: char): bool {.inline.} =
 
 func viewToken*(x: Lexer, k: TokenKind, future: int): Token {.inline.} =
   Token(kind: k, head: x.cursor, tail: x.cursor + future)
-
-
-# func futureSlice*(x: Lexer, i: int): string {.inline.} =
-#   x.source[x.cursor..<(x.cursor + i)]
 
 
 func valid*(t: Token): bool {.inline.} =
@@ -186,7 +183,7 @@ func eatIndent*(x: var Lexer) =
     if cur != IndentChar: break
     future.inc
   if future %% 2 != 0:
-    raise newException(LexerError, "invalid indentation")
+    raise newException(LexError, "invalid indentation")
   let level = future div 2
   if level != x.indent:
     x.addToken Token(kind: tkNewIndent, valueKind: tvInt, vInt: level)
@@ -218,16 +215,16 @@ func eatSpace*(x: var Lexer) =
 func prepareSource*(x: var Lexer) =
   x.eatSpace
   if x.indent != 0:
-    raise newException(LexerError, "invalid indentation")
+    raise newException(LexError, "invalid indentation")
 
 
 # todo: not sure about that break jumping and checking for exceptions
 func stateInfo(x: Lexer): string
-proc tokenize*(src: string, rules: openArray[LexerFunc]): Lexer =
+proc tokenize*(src: string, rules: openArray[LexDef]): Lexer =
   var x = Lexer(lineno: 1)
   shallowCopy x.source, src
   try:
-    var ret: LexerReturn
+    var ret: LexRet
     x.prepareSource
     while not x.atEnd:
       for rule in rules:
@@ -238,8 +235,8 @@ proc tokenize*(src: string, rules: openArray[LexerFunc]): Lexer =
           x.eatSpace
           break
       if not ret.tok.valid:
-        raise newException(LexerError, "unknown token")
-  except LexerError as err:
+        raise newException(LexError, "unknown token")
+  except LexError as err:
     echo "Error while lexing: ", err.msg, '\n', x.stateInfo
   result = x
 
@@ -251,18 +248,12 @@ func linepos*(x: Lexer): int =
     result.inc
 
 
-func `$`*(t: Token): string =
-  ## Because repr information is in source and tokens themselves
-  ## have no idea about their context - you can't print anything
-  $t.kind
-
-
 func `$`*(x: Lexer): string =
   for i, token in x.tokens:
-    result.add $token
+    result.add $token.kind
     if token.tail - token.head != 0:
       result.add " : "
-      result.add x.source[token.head..<token.tail] # todo: how to print it raw?
+      result.add x.source[token.head..<token.tail] # todo: print it raw?
     if i != x.tokens.len - 1:
       result.add '\n'
 
