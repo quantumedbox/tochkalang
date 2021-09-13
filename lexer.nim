@@ -36,9 +36,8 @@ type
     tokens*: seq[Token]
 
   LexRet* = tuple[tok: Token, progress: int]
-  LexDef* = proc(x: Lexer): LexRet {.nimcall, noSideEffect.}
   LexError* = object of CatchableError
-
+  LexDef* = proc(x: Lexer): LexRet {.nimcall, noSideEffect, raises: [LexError], gcsafe.}
 
 const
   EndChar* = '\0' # todo: not sure about char choise, maybe unicode has something for that
@@ -68,59 +67,6 @@ template lexRule*(feed: varargs[seq[LexDef], lexRuleUnify]): auto =
   result
 
 
-func atEnd*(x: Lexer): bool {.inline.} =
-  x.cursor >= x.source.len
-
-
-func addToken*(x: var Lexer, kind: TokenKind) {.inline.} =
-  x.tokens.add Token(kind: kind)
-
-
-func addToken*(x: var Lexer, tok: Token) {.inline.} =
-  x.tokens.add tok
-
-
-# func nextCursor*(x: Lexer): int {.inline.} =
-#   x.cursor + 1
-
-
-func current*(x: Lexer): char {.inline.} =
-  x.source[x.cursor]
-
-
-func next*(x: Lexer): char {.inline.} =
-  if not x.atEnd:
-    x.source[x.cursor + 1]
-  else:
-    EndChar
-
-
-# todo: maybe just use sets in code ? tho there might be some complex
-#       char checks to do
-func isSpace*(c: char): bool {.inline.} =
-  c in Whitespace
-
-
-func isNewline*(c: char): bool {.inline.} =
-  c in Newlines
-
-
-func isLetter*(c: char): bool {.inline.} =
-  c in {'a'..'z', 'A'..'Z'}
-
-
-func isNumber*(c: char): bool {.inline.} =
-  c in Digits
-
-
-func viewToken*(x: Lexer, k: TokenKind, future: int): Token {.inline.} =
-  Token(kind: k, head: x.cursor, tail: x.cursor + future)
-
-
-func valid*(t: Token): bool {.inline.} =
-  t.kind != tkError
-
-
 macro view*(x: Lexer, future: int): untyped =
   ## Shortcut for:
   ## toOpenArray(x.source, x.cursor, x.cursor + future)
@@ -136,22 +82,66 @@ macro view*(x: Lexer, future: int): untyped =
   )
 
 
+{.push inline, noSideEffect.}
+
+func atEnd*(x: Lexer): bool =
+  x.cursor >= x.source.len
+
+func addToken*(x: var Lexer, kind: TokenKind) =
+  x.tokens.add Token(kind: kind)
+
+func addToken*(x: var Lexer, tok: Token) =
+  x.tokens.add tok
+
+func current*(x: Lexer): char =
+  x.source[x.cursor]
+
+func next*(x: Lexer): char =
+  if not x.atEnd:
+    x.source[x.cursor + 1]
+  else:
+    EndChar
+
+
+# todo: maybe just use sets in code ? tho there might be some complex
+#       char checks to do
+func isSpace*(c: char): bool =
+  c in Whitespace
+
+func isNewline*(c: char): bool =
+  c in Newlines
+
+func isLetter*(c: char): bool =
+  c in {'a'..'z', 'A'..'Z'}
+
+func isNumber*(c: char): bool =
+  c in Digits
+
+
+func viewToken*(x: Lexer, k: TokenKind, future: int): Token =
+  Token(kind: k, head: x.cursor, tail: x.cursor + future)
+
+
+func valid*(t: Token): bool =
+  t.kind != tkError
+
+
 # todo: yeah, i love repeating code
-iterator stream*(x: Lexer): char {.inline, noSideEffect.} =
+iterator stream*(x: Lexer): char =
   var pos = x.cursor
   while pos < x.source.len:
     yield x.source[pos]
     pos.inc
 
 
-iterator stream*(x: Lexer, start: int): char {.inline, noSideEffect.} =
+iterator stream*(x: Lexer, start: int): char =
   var pos = start
   while pos < x.source.len:
     yield x.source[pos]
     pos.inc
 
 
-iterator pairstream*(x: Lexer): tuple[idx: int, ch: char] {.inline, noSideEffect.} =
+iterator pairstream*(x: Lexer): tuple[idx: int, ch: char] =
   var pos = x.cursor
   var idx: int
   while pos < x.source.len:
@@ -160,7 +150,7 @@ iterator pairstream*(x: Lexer): tuple[idx: int, ch: char] {.inline, noSideEffect
     idx.inc
 
 
-iterator futurestream*(x: Lexer): tuple[cur: char, next: char] {.inline, noSideEffect.} =
+iterator futurestream*(x: Lexer): tuple[cur: char, next: char] =
   var pos = x.cursor
   while pos < x.source.len - 1:
     yield (x.source[pos], x.source[pos + 1])
@@ -169,11 +159,13 @@ iterator futurestream*(x: Lexer): tuple[cur: char, next: char] {.inline, noSideE
     yield (x.source[pos], EndChar)
 
 
-iterator backstream*(x: Lexer): char {.inline, noSideEffect.} =
+iterator backstream*(x: Lexer): char =
   var pos = x.cursor
   while pos >= 0:
     yield x.source[pos]
     pos.dec
+
+{.pop.}
 
 
 func eatIndent*(x: var Lexer) =

@@ -9,6 +9,12 @@ export lexer
 # todo: make export maker its own token for ease of parsing
 
 # todo: maybe it is possible to parse idents and keywords at the same func?
+#       -- possible impl:
+#          . at compile time max possible keyword len is found
+#          . on parsing all literal chars eaten
+#          . if len of eaten sequence is larger than possible keyword len - it's identifier
+#          . then we can optimally traverse sequence for keyword match, possibly by introducing
+#            some special data structure, on fail - treat it as identifier
 
 # todo: it's possible for tkNewIndent to have no additional attached data as indentation
 #       might be written in vacant 'head' or 'tail' fields which aren't used

@@ -24,23 +24,28 @@ export ast
 
 # todo: maybe errors should return their start too? can be convenient
 
-# todo: macro system for implementation of rules
+# todo: macro system for implementation of rules, otherwise it's extremely bug prone and monotonous
 ## example:
-# astRule:
-#   "list"
+# astRule: "list"
 #   nkList:
 #     nkListOpen
 #     left <- *expr
 #     nkListClose
 
-
-proc astExpr(s: var AstState, start: int): GrammarRet
-proc astList(s: var AstState, start: int): GrammarRet
+# todo: consumer object for pushing stuff into pair trees programmatically
 
 
-proc consumePairs[T: GrammarDef](s: var AstState, def: T, start: int): GrammarRet =
+# todo: way of standardized forward declaration by just names
+proc astExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+proc astList(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+proc astDef(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+proc astAssign(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+proc astStmtList(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+proc astStmtListScope(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+
+
+proc consumePairs(s: var AstState, def: GrammarDef, start: int): GrammarRet =
   ## Generic pair constructor that packs successful calls into nkPair tree
-  # if only one match - return it as itself
   result = s.def(start)
   if result.node.valid:
     # if second match - construct pair of two matches
@@ -83,6 +88,7 @@ proc astExpr(s: var AstState, start: int): GrammarRet =
 
 proc astList(s: var AstState, start: int): GrammarRet =
   ## [?expr *expr]
+  ## left side <- elems of list
   result.node.kind = nkError
   let ghost = s.nodes.len
   if s[start].kind == tkListOpen:
@@ -91,7 +97,7 @@ proc astList(s: var AstState, start: int): GrammarRet =
       if s[exprs.future].kind == tkListClose:
         result.future = exprs.future + 1
         result.node.kind = nkList
-        result.node.left = s.emplace exprs.node
+        result.node.left = s.emplace(exprs.node)
       else:
         # call to consumePairs can allocate nodes, so we should clear them if list wasn't constructed
         s.letgo ghost
@@ -100,4 +106,51 @@ proc astList(s: var AstState, start: int): GrammarRet =
         result.node.kind = nkList
 
 
-const astModule* = [astList]
+proc astDef(s: var AstState, start: int): GrammarRet =
+  ## ident(name) ident(type) *ident(modifiers)
+  ## left side <- type specifier
+  ## todo: right side <- list of modifiers
+  result.node.kind = nkError
+  if s[start].kind == tkIdent and s[start + 1].kind == tkIdent:
+    result.node.kind = nkDef
+    result.node.head = s[start].head
+    result.node.tail = s[start].tail
+    result.node.left = s.emplace(
+      AstNode(
+        kind: nkIdent,
+        head: s[start + 1].head,
+        tail: s[start + 1].tail))
+    result.future = start + 2
+
+
+# todo: operating on previous stored node is troublesome, it might be better
+#       to require calling of depending functions from some middle ground
+proc astAssign(s: var AstState, start: int): GrammarRet =
+  ## >prev(variable) = stmtList | expr
+  ## left side <- settable / variable
+  ## right side <- setting / value
+  result.node.kind = nkError
+  let prev = s.nodes.high
+  # echo s.nodes[prev].kind
+  if s[start].kind == tkAssign and s.nodes[prev].kind != nkNone:
+    var variant: GrammarRet
+    variant = s.astExpr(start + 1)
+    if not variant.node.valid:
+      variant = s.astStmtListScope(start + 1)
+    if variant.node.valid:
+      result.node = AstNode(
+        kind: nkAssign,
+        left: prev,
+        right: s.emplace variant.node)
+      result.future = variant.future
+
+
+proc astStmtListScope(s: var AstState, start: int): GrammarRet =
+  discard
+
+
+proc astStmtList(s: var AstState, start: int): GrammarRet =
+  discard
+
+
+const astModule* = [astDef]

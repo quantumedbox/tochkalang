@@ -26,7 +26,7 @@ type
     nkList,
     nkProc,
     nkAssign,
-    nkDefinition,
+    nkDef,
 
   AstNode* = object
     kind*: AstKind
@@ -47,19 +47,20 @@ type
     tokens*: seq[Token]
     cursor*: int          # Position in tokens
     entries*: seq[int]    # Indexes of 'nodes' that are top-most
+    indent*: int
 
   GrammarRet* = tuple[node: AstNode, future: int]
-  GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall.}
-  # GrammarDef* = proc(s: var AstState): GrammarRet {.nimcall, noSideEffect.}
   GrammarError* = object of CatchableError
+  GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+  # GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall, raises: [GrammarError].}
 
-  GhostState* = tuple[cursor: int, nodes: int] # Used for restoring state after failure
+  # GhostState* = tuple[cursor: int, nodes: int] # Used for restoring state after failure
 
 
 const EmptyIndex: int = 0
 
 
-func `[]`*(s: AstState, i: Natural): Token =
+func `[]`*(s: AstState, i: Natural): Token {.inline.} =
   if i in s.tokens.low..s.tokens.high:
     s.tokens[i]
   else:
@@ -112,7 +113,7 @@ func letgo*(s: var AstState, i: Natural) {.inline.} =
 
 
 func valid*(n: AstNode): bool {.inline.} =
-  n.kind != nkError
+  n.kind != nkError and n.kind != nkNone
 
 
 proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
@@ -127,11 +128,13 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
       for rule in rules:
         ret = s.rule(cursor)
         if ret.node.valid:
+          if ret.future <= cursor:
+            raise newException(GrammarError, "infinite recursion as cursor wasn't progressed from rule")
           s.entries.add(s.emplace(ret.node))
           cursor = ret.future
           break
       if not ret.node.valid:
-        raise newException(GrammarError, "unknown grammar at pos " & $cursor)
+        raise newException(GrammarError, "unknown grammar at pos " & $s.tokens[cursor].head)
   except GrammarError as err:
     echo "Grammatical error: ", err.msg
   result = s
