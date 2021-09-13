@@ -5,7 +5,6 @@ type
     tkNone,                     # Default for not triggering error by clear initialization
     tkError,                    # Signal for caller that parsing wasn't successful
     tkIdent,                    # Literal symbol
-    # tkValue,                    # Any value that is known without context
     tkInt,
     tkString,
     tkKeyword,                  # Literal symbol protected from being an tkIdent
@@ -52,8 +51,7 @@ const
 
 
 func lexRuleUnify*(x: LexDef): seq[LexDef] = result.add x
-func lexRuleUnify*[ix: static int](arr: array[ix, LexDef]): seq[LexDef] =
-  for x in arr: result.add x
+func lexRuleUnify*[ix: static int](arr: array[ix, LexDef]): seq[LexDef] = result.add arr
 template lexRule*(feed: varargs[seq[LexDef], lexRuleUnify]): auto =
   const procs = static:
     var inline: seq[LexDef]
@@ -71,7 +69,7 @@ template lexRule*(feed: varargs[seq[LexDef], lexRuleUnify]): auto =
 
 
 func atEnd*(x: Lexer): bool {.inline.} =
-  x.cursor >= x.source.len - 1
+  x.cursor >= x.source.len
 
 
 func addToken*(x: var Lexer, kind: TokenKind) {.inline.} =
@@ -167,7 +165,8 @@ iterator futurestream*(x: Lexer): tuple[cur: char, next: char] {.inline, noSideE
   while pos < x.source.len - 1:
     yield (x.source[pos], x.source[pos + 1])
     pos.inc
-  yield (x.source[pos], EndChar)
+  if pos < x.source.len:
+    yield (x.source[pos], EndChar)
 
 
 iterator backstream*(x: Lexer): char {.inline, noSideEffect.} =

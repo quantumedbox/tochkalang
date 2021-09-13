@@ -1,27 +1,13 @@
 import strutils
 import lexer
 
-# todo: notable side effect of such implementation is the fact that we can't traverse
-#       resulting token list without information about offset of token structure
-#       as all nest levels are inlined in one buffer
-#       - possible solution for this is storing buffer offsets of all top-level tokens
-#       - alternatively we can traverse tree from top to bottom and calculate the size
-#           but it isn't really desirable
 
 # todo: show more detailed information about errors and AstState
 
-# todo: ability to store 'none' value in left/right fields of AstNode
-#       0 should reference nodes buffer, something like -1 then is default
-#       alternatively we can offset indexes by 1 and then first elem will be 1
-#       but it will fuck up my and everyone else's brain, so, no
-#       -- more stupid but kinda genius solution: just add dummy AstNode at the beginning
-#          of nodes buffer and don't have it registered in entries - then it will not be even
-#          accessible through current API
-
 
 ## GrammarDef requirements:
-#   each non error def should leave cursor on next positions after consumed part
-#   restoring state on error - task of def itself
+#   each non error def call should leave cursor on next positions after consumed part
+#   restoring state on error - responsibility of def itself
 
 
 type
@@ -60,10 +46,10 @@ type
     nodes*: seq[AstNode]
     tokens*: seq[Token]
     cursor*: int          # Position in tokens
-    entries*: seq[int]    # Indexes of 'nodes' seq that are top-most
+    entries*: seq[int]    # Indexes of 'nodes' that are top-most
 
   GrammarRet* = tuple[node: AstNode, future: int]
-  GrammarDef* = proc(s: var AstState): GrammarRet {.nimcall.}
+  GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall.}
   # GrammarDef* = proc(s: var AstState): GrammarRet {.nimcall, noSideEffect.}
   GrammarError* = object of CatchableError
 
@@ -73,31 +59,38 @@ type
 const EmptyIndex: int = 0
 
 
-# func initAstNode*(kind: AstKind = nkNone, head, tail: int = 0, left, right: int = EmptyIndex): AstNode =
-#   AstNode(kind: kind, head: head, tail: tail, left: left, right: right)
-
-
-func atEnd*(s: AstState): bool {.inline.} =
-  s.cursor >= s.tokens.len - 1
-
-
-func current*(s: AstState): Token {.inline.} =
-  s.tokens[s.cursor]
-
-
-func next*(s: AstState): Token {.inline.} =
-  if not s.atEnd:
-    s.tokens[s.cursor + 1]
+func `[]`*(s: AstState, i: Natural): Token =
+  if i in s.tokens.low..s.tokens.high:
+    s.tokens[i]
   else:
-    Token(kind: tkNone)
+    Token(kind: tkError)
 
 
-func oracle*(s: AstState, future: int): Token {.inline.} =
-  s.tokens[s.cursor + future]
+func isEnd*(s: AstState, i: Natural): bool {.inline.} =
+  i >= s.tokens.len
 
 
-func advance*(s: var AstState, i: int = 1) {.inline.} =
-  s.cursor += i
+# func atEnd*(s: AstState): bool {.inline.} =
+#   s.cursor >= s.tokens.len
+
+
+# func current*(s: AstState): Token {.inline.} =
+#   s.tokens[s.cursor]
+
+
+# func next*(s: AstState): Token {.inline.} =
+#   if not s.atEnd:
+#     s.tokens[s.cursor + 1]
+#   else:
+#     Token(kind: tkNone)
+
+
+# func oracle*(s: AstState, future: Natural): Token {.inline.} =
+#   s.tokens[s.cursor + future]
+
+
+# func advance*(s: var AstState, i: Natural = 1) {.inline.} =
+#   s.cursor += i
 
 
 func emplace*(s: var AstState, n: AstNode): int {.inline.} =
@@ -105,13 +98,17 @@ func emplace*(s: var AstState, n: AstNode): int {.inline.} =
   s.nodes.high
 
 
-func catchGhost*(s: AstState): GhostState {.inline.} =
-  (s.cursor, s.nodes.len)
+# func catchGhost*(s: AstState): GhostState {.inline.} =
+#   (s.cursor, s.nodes.len)
 
 
-func letgo*(s: var AstState, g: GhostState) {.inline.} =
-  s.cursor = g.cursor
-  s.nodes.setLen(g.nodes)
+# func letgo*(s: var AstState, g: GhostState) {.inline.} =
+#   s.cursor = g.cursor
+#   s.nodes.setLen(g.nodes)
+
+
+func letgo*(s: var AstState, i: Natural) {.inline.} =
+  s.nodes.setLen(i)
 
 
 func valid*(n: AstNode): bool {.inline.} =
@@ -122,39 +119,50 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
   var s: AstState
   shallowCopy s.source, x.source
   shallowCopy s.tokens, x.tokens
-  s.nodes.add AstNode(kind: nkNone) # dummy node that is reserved for 'null' of node left/right branches
+  s.nodes.add AstNode(kind: nkNone) # dummy node that is reserved for 'null'
   try:
     var ret: GrammarRet
-    while not s.atEnd:
+    var cursor: int
+    while not s.isEnd(cursor):
       for rule in rules:
-        ret = s.rule
+        ret = s.rule(cursor)
         if ret.node.valid:
-          s.entries.add s.emplace ret.node
+          s.entries.add(s.emplace(ret.node))
+          cursor = ret.future
           break
       if not ret.node.valid:
-        raise newException(GrammarError, "unknown grammar")
+        raise newException(GrammarError, "unknown grammar at pos " & $cursor)
   except GrammarError as err:
     echo "Grammatical error: ", err.msg
   result = s
 
 
-iterator stream*(s: var AstState): Token {.inline, noSideEffect.} =
-  # Warn! This advances cursor state
-  while s.cursor < s.tokens.len:
-    yield s.tokens[s.cursor]
-    s.cursor.inc
+iterator stream*(s: var AstState, i: Natural): Token {.inline, noSideEffect.} =
+  var pos = i
+  while pos < s.tokens.len:
+    yield s.tokens[pos]
+    pos.inc
+
+
+# iterator stream*(s: var AstState): Token {.inline, noSideEffect.} =
+#   # Warn! This advances cursor state
+#   while s.cursor < s.tokens.len:
+#     yield s.tokens[s.cursor]
+#     s.cursor.inc
 
 
 func `$`*(s: AstState): string =
   func recurToStr(s: AstState, n: AstNode, indent: int = 0): string =
     for i in 0..<indent:
-      result.add "-->"
+      result.add "->"
     result.add $n.kind
+    if n.head - n.tail != 0:
+      result.add " : "
+      result.add s.source[n.head..<n.tail]
     result.add '\n'
-    if n.left != 0:
-      result.add s.recurToStr(s.nodes[n.left], indent + 1)
-    if n.right != 0:
-      result.add s.recurToStr(s.nodes[n.right], indent + 1)
+    for side in [n.left, n.right]:
+      if side != EmptyIndex:
+        result.add s.recurToStr(s.nodes[side], indent + 1)
 
   for e, entry in s.entries:
     result.add s.recurToStr(s.nodes[entry])

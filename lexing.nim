@@ -1,9 +1,6 @@
 import lexer
 export lexer
 
-# todo: should tkValue be ambiguous? with that it is necessary to re-parse tokens in the future
-#       to get the actual typed value, we always could implement tokens as tagged unions of course
-#       and store hint for future after lexing
 
 # todo: specify descriptive error text on erroneous lex return for future displaying
 
@@ -20,7 +17,6 @@ export lexer
 #       some debugging information, ast trees then could infer to source range
 
 
-# todo: works, but not sure about that, could be clearer
 func lexIdent(x: Lexer): LexRet =
   if x.current.isLetter:
     var future: int
