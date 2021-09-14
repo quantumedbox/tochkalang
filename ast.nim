@@ -4,10 +4,12 @@ import lexer
 
 # todo: show more detailed information about errors and AstState
 
+# todo: nodes can have union of left/right and head/tail values
+#       as head/tail is usually required only for values and don't have hierarchy
+#       and structural nodes don't have representation in source (at least which matters for codegen)
+#       only hierarchy relations are important for them
 
-## GrammarDef requirements:
-#   each non error def call should leave cursor on next positions after consumed part
-#   restoring state on error - responsibility of def itself
+# todo: make that buffer capacity should grow in optimal/configurable chunks and not single elements
 
 
 type
@@ -21,10 +23,8 @@ type
     nkFloat,
     nkString,
     # nkExpr,
-    nkStmt,
-    nkStmtList,
+    nkBody,
     nkList,
-    nkProc,
     nkAssign,
     nkDef,
 
@@ -52,12 +52,9 @@ type
   GrammarRet* = tuple[node: AstNode, future: int]
   GrammarError* = object of CatchableError
   GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-  # GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall, raises: [GrammarError].}
 
-  # GhostState* = tuple[cursor: int, nodes: int] # Used for restoring state after failure
-
-
-const EmptyIndex: int = 0
+const
+  EmptyIndex: int = 0
 
 
 func `[]`*(s: AstState, i: Natural): Token {.inline.} =
@@ -71,41 +68,9 @@ func isEnd*(s: AstState, i: Natural): bool {.inline.} =
   i >= s.tokens.len
 
 
-# func atEnd*(s: AstState): bool {.inline.} =
-#   s.cursor >= s.tokens.len
-
-
-# func current*(s: AstState): Token {.inline.} =
-#   s.tokens[s.cursor]
-
-
-# func next*(s: AstState): Token {.inline.} =
-#   if not s.atEnd:
-#     s.tokens[s.cursor + 1]
-#   else:
-#     Token(kind: tkNone)
-
-
-# func oracle*(s: AstState, future: Natural): Token {.inline.} =
-#   s.tokens[s.cursor + future]
-
-
-# func advance*(s: var AstState, i: Natural = 1) {.inline.} =
-#   s.cursor += i
-
-
 func emplace*(s: var AstState, n: AstNode): int {.inline.} =
   s.nodes.add n
   s.nodes.high
-
-
-# func catchGhost*(s: AstState): GhostState {.inline.} =
-#   (s.cursor, s.nodes.len)
-
-
-# func letgo*(s: var AstState, g: GhostState) {.inline.} =
-#   s.cursor = g.cursor
-#   s.nodes.setLen(g.nodes)
 
 
 func letgo*(s: var AstState, i: Natural) {.inline.} =
@@ -127,14 +92,15 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
     while not s.isEnd(cursor):
       for rule in rules:
         ret = s.rule(cursor)
+        echo ret.future
         if ret.node.valid:
           if ret.future <= cursor:
-            raise newException(GrammarError, "infinite recursion as cursor wasn't progressed from rule")
+            raise newException(GrammarError, "infinite recursion prevented as future cursor is equal or less of present")
           s.entries.add(s.emplace(ret.node))
           cursor = ret.future
           break
       if not ret.node.valid:
-        raise newException(GrammarError, "unknown grammar at pos " & $s.tokens[cursor].head)
+        raise newException(GrammarError, "unknown grammar at pos " & $s.tokens[cursor].head) #todo
   except GrammarError as err:
     echo "Grammatical error: ", err.msg
   result = s
@@ -145,13 +111,6 @@ iterator stream*(s: var AstState, i: Natural): Token {.inline, noSideEffect.} =
   while pos < s.tokens.len:
     yield s.tokens[pos]
     pos.inc
-
-
-# iterator stream*(s: var AstState): Token {.inline, noSideEffect.} =
-#   # Warn! This advances cursor state
-#   while s.cursor < s.tokens.len:
-#     yield s.tokens[s.cursor]
-#     s.cursor.inc
 
 
 func `$`*(s: AstState): string =

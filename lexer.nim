@@ -71,7 +71,7 @@ macro view*(x: Lexer, future: int): untyped =
   ## Shortcut for:
   ## toOpenArray(x.source, x.cursor, x.cursor + future)
   newCall(
-    ident("toOpenArray"),
+    ident"toOpenArray",
     newDotExpr(x, ident("source")),
     newDotExpr(x, ident("cursor")),
     infix(
@@ -168,6 +168,7 @@ iterator backstream*(x: Lexer): char =
 {.pop.}
 
 
+# todo: new indent should only be signalized if line isn't empty
 func eatIndent*(x: var Lexer) =
   var future: int
   for cur in x.stream:

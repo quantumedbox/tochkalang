@@ -22,7 +22,7 @@ export ast
 # todo: maybe pass only 'var seq[AstNode]' instead of AstState? as rules should only
 #       use state for emplacing children
 
-# todo: maybe errors should return their start too? can be convenient
+# todo: maybe errors should return their start too? can be more than just convenient
 
 # todo: macro system for implementation of rules, otherwise it's extremely bug prone and monotonous
 ## example:
@@ -32,18 +32,40 @@ export ast
 #     left <- *expr
 #     nkListClose
 
-# todo: consumer object for pushing stuff into pair trees programmatically
-
 
 # todo: way of standardized forward declaration by just names
 proc astExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 proc astList(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 proc astDef(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 proc astAssign(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-proc astStmtList(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-proc astStmtListScope(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+proc astBody(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+proc astBodyScope(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 
 
+type
+  PairListBuilder = object
+    bottom*: int    # Points towards bottom-most allocated node
+    node*: AstNode  # Node for which tree is built
+
+
+func push(a: var PairListBuilder, s: var AstState, n: AstNode) {.inline.} =
+  if a.node.kind == nkNone:
+    a.node = n
+  elif a.node.kind != nkPair:
+    a.node = AstNode(
+      kind: nkPair,
+      left: s.emplace a.node,
+      right: s.emplace n)
+    a.bottom = a.node.right
+  else:
+    s.nodes[a.bottom] = AstNode(
+      kind: nkPair,
+      left: s.emplace s.nodes[a.bottom],
+      right: s.emplace n)
+    a.bottom = s.nodes[a.bottom].right
+
+
+# todo: make use of builder?
 proc consumePairs(s: var AstState, def: GrammarDef, start: int): GrammarRet =
   ## Generic pair constructor that packs successful calls into nkPair tree
   result = s.def(start)
@@ -56,17 +78,17 @@ proc consumePairs(s: var AstState, def: GrammarDef, start: int): GrammarRet =
         kind: nkPair,
         left: s.emplace(result.node),
         right: s.emplace(second.node))
-      var head = result.node.right
+      var bottom = result.node.right
       for token in s.stream(second.future):
         # all consequent matches work on right sides of most bottom current pair
         let other = s.def(result.future)
         if other.node.valid:
           result.future = other.future
-          s.nodes[head] = AstNode(
+          s.nodes[bottom] = AstNode(
             kind: nkPair,
-            left: s.emplace(s.nodes[head]),
+            left: s.emplace(s.nodes[bottom]),
             right: s.emplace(other.node))
-          head = s.nodes[head].right
+          bottom = s.nodes[bottom].right
         else: break
 
 
@@ -83,13 +105,13 @@ proc astExpr(s: var AstState, start: int): GrammarRet =
   of tkInt: setPrimitive nkInt
   of tkString: setPrimitive nkString
   of tkListOpen: result = s.astList(start)
-  else: result.node.kind = nkError
+  else: discard #result.node.kind = nkError
 
 
 proc astList(s: var AstState, start: int): GrammarRet =
   ## [?expr *expr]
   ## left side <- elems of list
-  result.node.kind = nkError
+  # result.node.kind = nkError
   let ghost = s.nodes.len
   if s[start].kind == tkListOpen:
     let exprs = s.consumePairs(astExpr, start + 1)
@@ -110,7 +132,7 @@ proc astDef(s: var AstState, start: int): GrammarRet =
   ## ident(name) ident(type) *ident(modifiers)
   ## left side <- type specifier
   ## todo: right side <- list of modifiers
-  result.node.kind = nkError
+  # result.node.kind = nkError
   if s[start].kind == tkIdent and s[start + 1].kind == tkIdent:
     result.node.kind = nkDef
     result.node.head = s[start].head
@@ -127,30 +149,49 @@ proc astDef(s: var AstState, start: int): GrammarRet =
 #       to require calling of depending functions from some middle ground
 proc astAssign(s: var AstState, start: int): GrammarRet =
   ## >prev(variable) = stmtList | expr
-  ## left side <- settable / variable
-  ## right side <- setting / value
-  result.node.kind = nkError
+  ## left side <- variable
+  ## right side <- value
+  # result.node.kind = nkError
   let prev = s.nodes.high
-  # echo s.nodes[prev].kind
   if s[start].kind == tkAssign and s.nodes[prev].kind != nkNone:
-    var variant: GrammarRet
-    variant = s.astExpr(start + 1)
-    if not variant.node.valid:
-      variant = s.astStmtListScope(start + 1)
-    if variant.node.valid:
+    var match: GrammarRet
+    match = s.astExpr(start + 1)
+    if not match.node.valid:
+      match = s.astBodyScope(start + 1)
+    if match.node.valid:
       result.node = AstNode(
         kind: nkAssign,
         left: prev,
-        right: s.emplace variant.node)
-      result.future = variant.future
+        right: s.emplace match.node)
+      result.future = match.future
 
 
-proc astStmtListScope(s: var AstState, start: int): GrammarRet =
-  discard
+proc astBodyScope(s: var AstState, start: int): GrammarRet =
+  ## New body scope that is opened by newline and new level of indentation
 
 
-proc astStmtList(s: var AstState, start: int): GrammarRet =
-  discard
+# todo: dealing with indent
+# todo: eating newlines
+proc astBody(s: var AstState, start: int): GrammarRet =
+  ## +((expr newline)|(stmt newline))
+  ## left side <- pair of expr|stmt or single expr|stmt
+  # result.node.kind = nkError
+  var builder: PairListBuilder
+  var match: GrammarRet
+  var cursor: int = start
+  while true:
+    match = s.astExpr(cursor)
+    if match.node.valid:
+      builder.push(s, match.node)
+      if s[match.future].kind != tkNewline or not s[match.future].valid:
+        break
+      else: cursor = match.future + 1
+  if builder.node.valid:
+    result.node = AstNode(
+      kind: nkBody,
+      left: s.emplace builder.node)
+    result.future = cursor
 
 
-const astModule* = [astDef]
+const astModule* = [astBody]
+# const astModule* = [astDef, astAssign]
