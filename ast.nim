@@ -43,9 +43,9 @@ type
     # by utilizing single buffer for all ast nodes and make them reference
     # each other by buffer offset instead of pointers to heap allocated space
     source*: string
-    nodes*: seq[AstNode]
     tokens*: seq[Token]
-    cursor*: int          # Position in tokens
+    nodes*: seq[AstNode]
+    # cursor*: int        # Position in tokens
     entries*: seq[int]    # Indexes of 'nodes' that are top-most
     indent*: int
 

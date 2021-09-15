@@ -18,6 +18,7 @@ type
   TokenValueKind* = enum
     tvNone,
     tvInt,
+    tvUint,
 
   Token* = object
     kind*: TokenKind
@@ -27,12 +28,14 @@ type
     of tvNone: discard
     of tvInt:
       vInt*: int
+    of tvUint:
+      vUint*: uint
 
   Lexer* = object
     source*: string # todo: maybe it should be ref? as it will be passed around
     cursor*: int
-    lineno*: int
-    indent*: int
+    lineno*: uint
+    indent*: uint
     tokens*: seq[Token]
 
   LexRet* = tuple[tok: Token, progress: int]
@@ -84,6 +87,11 @@ macro view*(x: Lexer, future: int): untyped =
 
 {.push inline, noSideEffect.}
 
+func `[]`*(x: Lexer, i: Natural): char =
+  if i in x.source.low..x.source.high:
+    x.source[i]
+  else: EndChar
+
 func atEnd*(x: Lexer): bool =
   x.cursor >= x.source.len
 
@@ -99,9 +107,7 @@ func current*(x: Lexer): char =
 func next*(x: Lexer): char =
   if not x.atEnd:
     x.source[x.cursor + 1]
-  else:
-    EndChar
-
+  else: EndChar
 
 # todo: maybe just use sets in code ? tho there might be some complex
 #       char checks to do
@@ -110,6 +116,9 @@ func isSpace*(c: char): bool =
 
 func isNewline*(c: char): bool =
   c in Newlines
+
+func isSpaceNotNewline*(c: char): bool =
+  c in Whitespace - Newlines
 
 func isLetter*(c: char): bool =
   c in {'a'..'z', 'A'..'Z'}
@@ -150,7 +159,7 @@ iterator pairstream*(x: Lexer): tuple[idx: int, ch: char] =
     idx.inc
 
 
-iterator futurestream*(x: Lexer): tuple[cur: char, next: char] =
+iterator nextstream*(x: Lexer): tuple[cur: char, next: char] =
   var pos = x.cursor
   while pos < x.source.len - 1:
     yield (x.source[pos], x.source[pos + 1])
@@ -168,39 +177,50 @@ iterator backstream*(x: Lexer): char =
 {.pop.}
 
 
-# todo: new indent should only be signalized if line isn't empty
-func eatIndent*(x: var Lexer) =
-  var future: int
-  for cur in x.stream:
-    if cur != IndentChar: break
-    future.inc
-  if future %% 2 != 0:
-    raise newException(LexError, "invalid indentation")
-  let level = future div 2
-  if level != x.indent:
-    x.addToken Token(kind: tkNewIndent, valueKind: tvInt, vInt: level)
-    x.indent = level
-
-
 func eatSpace*(x: var Lexer) =
-  var windowsSkip: bool
-  for cur, next in x.futurestream:
-    if windowsSkip:
-      windowsSkip = false
-    elif cur == '\r' and next == '\n': # windows newline
-      x.addToken tkNewline
+  func eatIndent(x: var Lexer, start: int): int =
+    ## Used for skipping empty lines and detecting change of indentation
+    var indent: int
+    var windowsSkip: bool
+    var cursor = start
+    while x[cursor] != EndChar:
+      let cur = x[cursor]
+      let next = x[cursor + 1]
+      if windowsSkip: windowsSkip = false
+      elif cur == IndentChar:
+        indent.inc
+        cursor.inc
+      elif cur == '\r' and next == '\n': # windows newline
+        cursor += 2
+        windowsSkip = true
+        indent.reset
+      elif cur == '\n': # unix newline
+        cursor.inc
+        indent.reset
+      else:
+        x.addToken tkNewline
+        if indent.uint mod 2 != 0:
+          raise newException(LexError, "invalid indentation of " & $indent & " amount of spaces")
+        let level = indent.uint div 2
+        if level != x.indent:
+          x.addToken Token(kind: tkNewIndent, valueKind: tvUint, vUint: level)
+          x.indent = level
+        break
+    cursor
+
+  var cursor = x.cursor
+  while x[cursor] != EndChar:
+    let cur = x[cursor]
+    if cur.isSpaceNotNewline:
+      cursor.inc
+    elif cur == '\r' and x[cursor + 1] == '\n': # windows newline
       x.lineno.inc
-      x.cursor += 2
-      x.eatIndent
-      windowsSkip = true
+      cursor = x.eatIndent(cursor + 2)
     elif cur == '\n': # unix newline
-      x.addToken tkNewline
       x.lineno.inc
-      x.cursor.inc
-      x.eatIndent
-    elif cur.isSpace:
-      x.cursor.inc
+      cursor = x.eatIndent(cursor + 1)
     else: break
+  x.cursor = cursor
 
 
 # todo: doesn't work in many cases, needs some special handling
@@ -227,7 +247,7 @@ proc tokenize*(src: string, rules: openArray[LexDef]): Lexer =
           x.eatSpace
           break
       if not ret.tok.valid:
-        raise newException(LexError, "unknown token")
+        raise newException(LexError, "unknown token " & x.current)
   except LexError as err:
     echo "Error while lexing: ", err.msg, '\n', x.stateInfo
   result = x
@@ -246,7 +266,16 @@ func `$`*(x: Lexer): string =
     if token.tail - token.head != 0:
       result.add " : "
       result.add x.source[token.head..<token.tail] # todo: print it raw?
-    if i != x.tokens.len - 1:
+    case token.valueKind
+    of tvInt:
+      result.add " : "
+      result.add $token.vInt
+    of tvUint:
+      result.add " : "
+      result.add $token.vUint
+      result.add "u"
+    else: discard
+    if i != x.tokens.high:
       result.add '\n'
 
 
