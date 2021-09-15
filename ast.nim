@@ -15,10 +15,12 @@ import lexer
 #       you wouldn't need calculating offset from base and bound check
 #       safety-wise it should be okay as nodes do not permanently allocate unless they're successful at which point they're static
 
+# todo: 'sequence node kinds' should act as pairs without need of incorporating pair at top level
+#       for example list and body can be 'sequence' kinds as they only store sequences of children
 
 type
   AstKind* = enum
-    nkNone,       # Default for not triggering error by clear initialization
+    nkNone,
     nkError,
     nkPair,       # Special kind for implementing lists within buffer
     nkIdent,
@@ -26,7 +28,6 @@ type
     nkInt,
     nkFloat,
     nkString,
-    # nkExpr,
     nkBody,
     nkList,
     nkAssign,
@@ -60,30 +61,38 @@ type
 
 const
   EmptyIndex: int = 0
+  ScopedNodes* = {nkBody, nkIfExpr}
 
 
-func `[]`*(s: AstState, i: Natural): Token {.inline.} =
+{.push inline.}
+
+func `[]`*(s: AstState, i: Natural): Token =
   if i in s.tokens.low..s.tokens.high:
     s.tokens[i]
   else:
     Token(kind: tkError)
 
+func lastNode*(s: AstState): AstNode =
+  s.nodes[s.nodes.high]
 
-func isEnd*(s: AstState, i: Natural): bool {.inline.} =
+
+func isEnd*(s: AstState, i: Natural): bool =
   i >= s.tokens.len
 
 
-func emplace*(s: var AstState, n: AstNode): int {.inline.} =
+func emplace*(s: var AstState, n: AstNode): int =
   s.nodes.add n
   s.nodes.high
 
 
-func letgo*(s: var AstState, i: Natural) {.inline.} =
+func letgo*(s: var AstState, i: Natural) =
   s.nodes.setLen(i)
 
 
-func valid*(n: AstNode): bool {.inline.} =
+func valid*(n: AstNode): bool =
   n.kind != nkError and n.kind != nkNone
+
+{.pop.}
 
 
 proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
@@ -105,7 +114,7 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
           cursor = ret.future
           break
       if not ret.node.valid:
-        raise newException(GrammarError, "unknown grammar at pos " & $s.tokens[cursor].head) #todo
+        raise newException(GrammarError, "unknown grammar at pos " & $s.tokens[cursor].head) # todo: more helpful info
   except GrammarError as err:
     echo "Grammatical error: ", err.msg
   result = s
@@ -118,20 +127,20 @@ iterator stream*(s: var AstState, i: Natural): Token {.inline, noSideEffect.} =
     pos.inc
 
 
-func `$`*(s: AstState): string =
-  func recurToStr(s: AstState, n: AstNode, indent: int = 0): string =
-    for i in 0..<indent:
-      result.add "->"
-    result.add $n.kind
-    if n.head - n.tail != 0:
-      result.add " : "
-      result.add s.source[n.head..<n.tail]
-    result.add '\n'
-    for side in [n.left, n.right]:
-      if side != EmptyIndex:
-        result.add s.recurToStr(s.nodes[side], indent + 1)
+func nodeToString*(s: AstState, n: AstNode, indent: int = 0): string =
+  for i in 0..<indent:
+    result.add "->"
+  result.add $n.kind
+  if n.head - n.tail != 0:
+    result.add " : "
+    result.add s.source[n.head..<n.tail]
+  result.add '\n'
+  for side in [n.left, n.right]:
+    if side != EmptyIndex:
+      result.add s.nodeToString(s.nodes[side], indent + 1)
 
+func `$`*(s: AstState): string =
   for e, entry in s.entries:
-    result.add s.recurToStr(s.nodes[entry])
+    result.add s.nodeToString(s.nodes[entry])
     if e != s.entries.high:
       result.add '\n'

@@ -22,13 +22,13 @@ export ast
 
 
 # todo: way of standardized forward declaration by just names
-proc astExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-proc astList(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-proc astDef(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-proc astIfExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-# proc astAssign(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-proc astBody(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-proc astBodyScope(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+func astExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+func astList(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+func astDef(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+func astIfExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+# func astAssign(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+func astBody(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+func astColonBody(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 
 
 type
@@ -55,7 +55,7 @@ func push(a: var PairListBuilder, s: var AstState, n: AstNode) {.inline.} =
 
 
 # todo: make use of builder?
-proc consumePairs(s: var AstState, def: GrammarDef, start: int): GrammarRet =
+func consumePairs(s: var AstState, def: GrammarDef, start: int): GrammarRet =
   ## Generic pair constructor that packs successful calls into nkPair tree
   result = s.def(start)
   if result.node.valid:
@@ -81,7 +81,7 @@ proc consumePairs(s: var AstState, def: GrammarDef, start: int): GrammarRet =
         else: break
 
 
-proc astExpr(s: var AstState, start: int): GrammarRet =
+func astExpr(s: var AstState, start: int): GrammarRet =
   ## +(ident|int|string|list)
   template setPrimitive(k: AstKind) =
     result.node.kind = k
@@ -98,10 +98,10 @@ proc astExpr(s: var AstState, start: int): GrammarRet =
   else: discard #result.node.kind = nkError
 
 
-proc astList(s: var AstState, start: int): GrammarRet =
+# todo: base list node can act as pair by itself, this way we can reduce the amount of nodes
+func astList(s: var AstState, start: int): GrammarRet =
   ## [?expr *expr]
   ## left side <- elems of list
-  # result.node.kind = nkError
   let ghost = s.nodes.len
   if s[start].kind == tkListOpen:
     let exprs = s.consumePairs(astExpr, start + 1)
@@ -118,11 +118,10 @@ proc astList(s: var AstState, start: int): GrammarRet =
         result.node.kind = nkList
 
 
-proc astDef(s: var AstState, start: int): GrammarRet =
+func astDef(s: var AstState, start: int): GrammarRet =
   ## ident(name) ident(type) *ident(modifiers)
   ## left side <- type specifier
   ## right side <- initializing value
-  # result.node.kind = nkError
   if s[start].kind == tkIdent and s[start + 1].kind == tkIdent:
     result.node.kind = nkDef
     result.node.head = s[start].head
@@ -140,33 +139,11 @@ proc astDef(s: var AstState, start: int): GrammarRet =
         result.future = match.future
 
 
-# todo: operating on previous stored node is troublesome, it might be better
-#       to require calling of depending functions from some middle ground
-# proc astAssign(s: var AstState, start: int): GrammarRet =
-#   ## >prev(variable) = stmtList | expr
-#   ## left side <- variable
-#   ## right side <- value
-#   # result.node.kind = nkError
-#   let prev = s.nodes.high
-#   if s[start].kind == tkAssign and s.nodes[prev].kind != nkNone:
-#     var match: GrammarRet
-#     match = s.astExpr(start + 1)
-#     if not match.node.valid:
-#       match = s.astBodyScope(start + 1)
-#     if match.node.valid:
-#       result.node = AstNode(
-#         kind: nkAssign,
-#         left: prev,
-#         right: s.emplace match.node)
-#       result.future = match.future
-
-
-proc astIfExpr(s: var AstState, start: int): GrammarRet =
-  result.node.kind = nkError
+func astIfExpr(s: var AstState, start: int): GrammarRet =
   if s[start].kind == tkIf:
     let exprMatch = s.astExpr(start + 1)
     if exprMatch.node.valid:
-      let bodyMatch = s.astBodyScope exprMatch.future
+      let bodyMatch = s.astColonBody exprMatch.future
       if bodyMatch.node.valid:
         result.node = AstNode(
           kind: nkIfExpr,
@@ -175,9 +152,8 @@ proc astIfExpr(s: var AstState, start: int): GrammarRet =
         result.future = bodyMatch.future
 
 
-proc astBodyScope(s: var AstState, start: int): GrammarRet =
+func astColonBody(s: var AstState, start: int): GrammarRet =
   ## New body scope that is opened by colon, newline and new level of indentation
-  result.node.kind = nkError
   if s[start].kind == tkColon and s[start + 1].kind == tkNewIndent:
     if s[start + 1].vUint == s.indent + 1:
       s.indent.inc
@@ -186,43 +162,41 @@ proc astBodyScope(s: var AstState, start: int): GrammarRet =
 
 # todo: so error-prone, jeez
 # todo: quite possibly might need 'letgo' call
-proc astBody(s: var AstState, start: int): GrammarRet =
+# todo: better to restructure this
+func astBody(s: var AstState, start: int): GrammarRet =
   ## +(def|expr)
   ## left side <- pair of expr|stmt or single expr|stmt
-  result.node.kind = nkError
-  template matchSuccess() =
+  template matchVariant(rule: GrammarDef) =
+    let match = s.rule(cursor)
     if match.node.valid:
-      cursor = match.future
       builder.push(s, match.node)
-      if not s[match.future].valid:
-        break
-      elif s[match.future].kind == tkNewIndent:
-        if s[match.future].vUint < indent:
-          s.indent = s[match.future].vUint # todo: it's really strange to set indent from within rule
+      cursor = match.future
+      let cur = s[match.future]
+      if not cur.valid: break # eof?
+      elif cur.kind == tkNewIndent:
+        if cur.vUint < indent:
+          s.indent = cur.vUint # todo: it's really strange to set indent from within rule
           cursor.inc
           break
         else:
           raise newException(GrammarError, "invalid indentation within body")
-      else: cursor.inc
+      elif cur.kind == tkNewline: # nested scopes delete newlines, so, we have to check
+        cursor.inc
+      elif match.node.kind in ScopedNodes: discard
+      else: break
+      continue # start new matching round
 
-  var builder: PairListBuilder
-  var match: GrammarRet
-  var cursor: int = start
+  var
+    builder: PairListBuilder
+    cursor = start
   let indent = s.indent
   while true:
-    match = s.astIfExpr(cursor)
-    if match.node.valid:
-      matchSuccess()
-    else:
-      match = s.astDef(cursor)
-      if match.node.valid:
-        matchSuccess()
-      else:
-        match = s.astExpr(cursor)
-        if match.node.valid:
-          matchSuccess()
+    matchVariant astIfExpr
+    matchVariant astDef
+    matchVariant astExpr
 
   if builder.node.valid:
+    # debugEcho s.nodeToString(builder.node)
     result.node = AstNode(
       kind: nkBody,
       left: s.emplace builder.node)

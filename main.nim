@@ -8,4 +8,7 @@ else:
   echo "too many tokens to sanely print..."
 if x.atEnd:
   let s = parse(x, astModule)
-  echo s
+  if s.nodes.len <= 50:
+    echo s
+  else:
+    echo "too many nodes to sanely print..."

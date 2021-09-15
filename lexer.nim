@@ -1,5 +1,11 @@
 import std/[strutils, macros]
 
+# todo: token to string repr utility
+
+# todo: introduction of EOF token can help in certain cases
+#       this way checking for EOF can be done via the same methods as other tokens
+#       and not cursor/bound checks
+
 type
   TokenKind* = enum
     tkNone,                     # Default for not triggering error by clear initialization
@@ -73,7 +79,7 @@ template lexRule*(feed: varargs[seq[LexDef], lexRuleUnify]): auto =
   result
 
 
-# todo: compile-time tree of nodes for fast lookup char by char
+# todo: compile-time tree of nodes for fast lookup of keywords char by char
 #       we can also optimize by using arrays and indexes that correspond with characters
 #       if keywords are only in ASCII - 256 possible elems per variant shouldn't add too much
 #       non-valid variants should be 0 mem then
@@ -86,19 +92,8 @@ template push(a: KeywordTreeNode): untyped =
   discard
 
 
-macro view*(x: Lexer, future: int): untyped =
-  ## Shortcut for:
-  ## toOpenArray(x.source, x.cursor, x.cursor + future)
-  newCall(
-    ident"toOpenArray",
-    newDotExpr(x, ident("source")),
-    newDotExpr(x, ident("cursor")),
-    infix(
-      newDotExpr(x, ident("cursor")),
-      "+",
-      future
-    )
-  )
+template view*(x: Lexer, future: int): auto =
+  toOpenArray(x.source, x.cursor, x.cursor + future - 1)
 
 
 {.push inline, noSideEffect.}
@@ -192,7 +187,7 @@ iterator backstream*(x: Lexer): char =
 
 {.pop.}
 
-
+# todo: ? is checking for "\r\n" necessary? we can simplify it if it's just either '\r' or '\n' for newline
 func eatIndent(x: var Lexer, start: int): int =
   ## Used for skipping empty lines and detecting change of indentation
   var indent: int
