@@ -4,16 +4,16 @@ type
   TokenKind* = enum
     tkNone,                     # Default for not triggering error by clear initialization
     tkError,                    # Signal for caller that parsing wasn't successful
+    tkNewline,                  # {'\n', '\r'}
+    tkNewIndent,                # Change of indentation level
     tkIdent,                    # Literal symbol
     tkInt,
     tkString,
-    tkKeyword,                  # Literal symbol protected from being an tkIdent
     tkDot,                      # '.'
     tkAssign,                   # '='
-    tkColon,                    # Used for opening scopes and specifying return type
+    tkColon,                    # ':' Used for opening scopes and specifying return type
     tkListOpen, tkListClose,    # '[', ']'
-    tkNewline,                  # {'\n', '\r'}
-    tkNewIndent,                # Change of indentation level
+    tkIf,
 
   TokenValueKind* = enum
     tvNone,
@@ -50,7 +50,7 @@ const
   IndentChar* = ' '
 
   # todo: all reserved words should be their own token
-  ReservedWords* = ["mut", "type", "cond"] # should only consist of isLetter chars
+  # ReservedWords* = ["mut", "type", "cond", "if"] # should only consist of isLetter chars
   ExportMarker* = '*'
   StringMarker* = '"'
 
@@ -71,6 +71,19 @@ template lexRule*(feed: varargs[seq[LexDef], lexRuleUnify]): auto =
       emplace[i] = x
     emplace
   result
+
+
+# todo: compile-time tree of nodes for fast lookup char by char
+#       we can also optimize by using arrays and indexes that correspond with characters
+#       if keywords are only in ASCII - 256 possible elems per variant shouldn't add too much
+#       non-valid variants should be 0 mem then
+type
+  KeywordTreeNode = object
+    ch: char
+    points: ptr KeywordTreeNode
+
+template push(a: KeywordTreeNode): untyped =
+  discard
 
 
 macro view*(x: Lexer, future: int): untyped =

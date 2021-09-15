@@ -1,18 +1,6 @@
 import ast, lexer
 export ast
 
-
-# todo: alternative idea: pass cursor advancement as mutable shared int
-#       this way can be achieved locality without storing ghost state in each stage
-#       and in general when working with branches it's preferable to not depend
-#       on single data i.e. AstState instance
-#       -- this requires usage of ptr that points to stack memory which is unsafe
-#          we have to make sure that passed pointer can't be saved, otherwise
-#          it's guaranteed by call nature that passed ptr always alive
-#          -- maybe we can define some type that prohibit assignment and distinct?
-#       -- mutability isn't necessary, we could just make that each def must receive
-#          starting position and return advancement if that happened
-
 # todo: make node children as sequences within the buffer, ideally neighboring
 #       the node itself and just storing seq size for bound checking
 #       -- main problem with this that recursive node building requires
@@ -37,7 +25,8 @@ export ast
 proc astExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 proc astList(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 proc astDef(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
-proc astAssign(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+proc astIfExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+# proc astAssign(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 proc astBody(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 proc astBodyScope(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 
@@ -105,6 +94,7 @@ proc astExpr(s: var AstState, start: int): GrammarRet =
   of tkInt: setPrimitive nkInt
   of tkString: setPrimitive nkString
   of tkListOpen: result = s.astList(start)
+  of tkIf: result = s.astIfExpr(start)
   else: discard #result.node.kind = nkError
 
 
@@ -131,7 +121,7 @@ proc astList(s: var AstState, start: int): GrammarRet =
 proc astDef(s: var AstState, start: int): GrammarRet =
   ## ident(name) ident(type) *ident(modifiers)
   ## left side <- type specifier
-  ## todo: right side <- list of modifiers
+  ## right side <- initializing value
   # result.node.kind = nkError
   if s[start].kind == tkIdent and s[start + 1].kind == tkIdent:
     result.node.kind = nkDef
@@ -143,44 +133,64 @@ proc astDef(s: var AstState, start: int): GrammarRet =
         head: s[start + 1].head,
         tail: s[start + 1].tail))
     result.future = start + 2
+    if s[start + 2].kind == tkAssign:
+      let match = s.astExpr(start + 3)
+      if match.node.valid:
+        result.node.right = s.emplace match.node
+        result.future = match.future
 
 
 # todo: operating on previous stored node is troublesome, it might be better
 #       to require calling of depending functions from some middle ground
-proc astAssign(s: var AstState, start: int): GrammarRet =
-  ## >prev(variable) = stmtList | expr
-  ## left side <- variable
-  ## right side <- value
-  # result.node.kind = nkError
-  let prev = s.nodes.high
-  if s[start].kind == tkAssign and s.nodes[prev].kind != nkNone:
-    var match: GrammarRet
-    match = s.astExpr(start + 1)
-    if not match.node.valid:
-      match = s.astBodyScope(start + 1)
-    if match.node.valid:
-      result.node = AstNode(
-        kind: nkAssign,
-        left: prev,
-        right: s.emplace match.node)
-      result.future = match.future
+# proc astAssign(s: var AstState, start: int): GrammarRet =
+#   ## >prev(variable) = stmtList | expr
+#   ## left side <- variable
+#   ## right side <- value
+#   # result.node.kind = nkError
+#   let prev = s.nodes.high
+#   if s[start].kind == tkAssign and s.nodes[prev].kind != nkNone:
+#     var match: GrammarRet
+#     match = s.astExpr(start + 1)
+#     if not match.node.valid:
+#       match = s.astBodyScope(start + 1)
+#     if match.node.valid:
+#       result.node = AstNode(
+#         kind: nkAssign,
+#         left: prev,
+#         right: s.emplace match.node)
+#       result.future = match.future
+
+
+proc astIfExpr(s: var AstState, start: int): GrammarRet =
+  result.node.kind = nkError
+  if s[start].kind == tkIf:
+    let exprMatch = s.astExpr(start + 1)
+    if exprMatch.node.valid:
+      let bodyMatch = s.astBodyScope exprMatch.future
+      if bodyMatch.node.valid:
+        result.node = AstNode(
+          kind: nkIfExpr,
+          left: s.emplace exprMatch.node,
+          right: s.emplace bodyMatch.node)
+        result.future = bodyMatch.future
 
 
 proc astBodyScope(s: var AstState, start: int): GrammarRet =
-  ## New body scope that is opened by newline and new level of indentation
+  ## New body scope that is opened by colon, newline and new level of indentation
+  result.node.kind = nkError
+  if s[start].kind == tkColon and s[start + 1].kind == tkNewIndent:
+    if s[start + 1].vUint == s.indent + 1:
+      s.indent.inc
+      result = s.astBody(start + 2)
 
 
 # todo: so error-prone, jeez
+# todo: quite possibly might need 'letgo' call
 proc astBody(s: var AstState, start: int): GrammarRet =
-  ## +((expr newline)|(stmt newline))
+  ## +(def|expr)
   ## left side <- pair of expr|stmt or single expr|stmt
-  # result.node.kind = nkError
-  var builder: PairListBuilder
-  var match: GrammarRet
-  var cursor: int = start
-  let indent = s.indent
-  while true:
-    match = s.astExpr(cursor)
+  result.node.kind = nkError
+  template matchSuccess() =
     if match.node.valid:
       cursor = match.future
       builder.push(s, match.node)
@@ -194,6 +204,24 @@ proc astBody(s: var AstState, start: int): GrammarRet =
         else:
           raise newException(GrammarError, "invalid indentation within body")
       else: cursor.inc
+
+  var builder: PairListBuilder
+  var match: GrammarRet
+  var cursor: int = start
+  let indent = s.indent
+  while true:
+    match = s.astIfExpr(cursor)
+    if match.node.valid:
+      matchSuccess()
+    else:
+      match = s.astDef(cursor)
+      if match.node.valid:
+        matchSuccess()
+      else:
+        match = s.astExpr(cursor)
+        if match.node.valid:
+          matchSuccess()
+
   if builder.node.valid:
     result.node = AstNode(
       kind: nkBody,

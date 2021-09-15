@@ -31,6 +31,7 @@ type
     nkList,
     nkAssign,
     nkDef,
+    nkIfExpr,
 
   AstNode* = object
     kind*: AstKind

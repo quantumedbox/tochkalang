@@ -40,14 +40,24 @@ func lexIdent(x: Lexer): LexRet =
     (Token(kind: tkError), 0)
 
 
+# func lexKeyword(x: Lexer): LexRet =
+#   var future: int
+#   for ch in x.stream:
+#     if not ch.isLetter: break
+#     future.inc
+#   for keyword in ReservedWords:
+#     if x.view(future) == keyword.toOpenArray(keyword.low, keyword.high):
+#       return (Token(kind: tkKeyword), future)
+#   (Token(kind: tkError), 0)
+
+
 func lexKeyword(x: Lexer): LexRet =
   var future: int
   for ch in x.stream:
     if not ch.isLetter: break
     future.inc
-  for keyword in ReservedWords:
-    if x.view(future) == keyword.toOpenArray(keyword.low, keyword.high):
-      return (Token(kind: tkKeyword), future)
+  if x.view(future - 1) == "if":
+    return (Token(kind: tkIf), future)
   (Token(kind: tkError), 0)
 
 
@@ -93,4 +103,4 @@ func lexSymbol(x: Lexer): LexRet =
 
 
 const lexValue = lexRule(lexInt, lexString)
-const lexModule* = lexRule(lexSymbol, lexIdent, lexKeyword, lexValue)
+const lexModule* = lexRule(lexSymbol, lexKeyword, lexIdent, lexValue)
