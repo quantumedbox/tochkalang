@@ -38,6 +38,9 @@ type
     indent*: uint
     tokens*: seq[Token]
 
+    # Extra hints
+    initialIndent*: uint
+
   LexRet* = tuple[tok: Token, progress: int]
   LexError* = object of CatchableError
   LexDef* = proc(x: Lexer): LexRet {.nimcall, noSideEffect, raises: [LexError], gcsafe.}
@@ -177,37 +180,38 @@ iterator backstream*(x: Lexer): char =
 {.pop.}
 
 
-func eatSpace*(x: var Lexer) =
-  func eatIndent(x: var Lexer, start: int): int =
-    ## Used for skipping empty lines and detecting change of indentation
-    var indent: int
-    var windowsSkip: bool
-    var cursor = start
-    while x[cursor] != EndChar:
-      let cur = x[cursor]
-      let next = x[cursor + 1]
-      if windowsSkip: windowsSkip = false
-      elif cur == IndentChar:
-        indent.inc
-        cursor.inc
-      elif cur == '\r' and next == '\n': # windows newline
-        cursor += 2
-        windowsSkip = true
-        indent.reset
-      elif cur == '\n': # unix newline
-        cursor.inc
-        indent.reset
+func eatIndent(x: var Lexer, start: int): int =
+  ## Used for skipping empty lines and detecting change of indentation
+  var indent: int
+  var windowsSkip: bool
+  var cursor = start
+  while x[cursor] != EndChar:
+    let cur = x[cursor]
+    let next = x[cursor + 1]
+    if windowsSkip: windowsSkip = false
+    elif cur == IndentChar:
+      indent.inc
+      cursor.inc
+    elif cur == '\r' and next == '\n': # windows newline
+      cursor += 2
+      windowsSkip = true
+      indent.reset
+    elif cur == '\n': # unix newline
+      cursor.inc
+      indent.reset
+    else:
+      if indent.uint mod 2 != 0:
+        raise newException(LexError, "invalid indentation of " & $indent & " amount of spaces")
+      let level = indent.uint div 2
+      if level != x.indent:
+        x.addToken Token(kind: tkNewIndent, valueKind: tvUint, vUint: level)
+        x.indent = level
       else:
         x.addToken tkNewline
-        if indent.uint mod 2 != 0:
-          raise newException(LexError, "invalid indentation of " & $indent & " amount of spaces")
-        let level = indent.uint div 2
-        if level != x.indent:
-          x.addToken Token(kind: tkNewIndent, valueKind: tvUint, vUint: level)
-          x.indent = level
-        break
-    cursor
+      break
+  cursor
 
+func eatSpace*(x: var Lexer) =
   var cursor = x.cursor
   while x[cursor] != EndChar:
     let cur = x[cursor]
@@ -223,11 +227,11 @@ func eatSpace*(x: var Lexer) =
   x.cursor = cursor
 
 
-# todo: doesn't work in many cases, needs some special handling
 func prepareSource*(x: var Lexer) =
-  x.eatSpace
-  if x.indent != 0:
-    raise newException(LexError, "invalid indentation")
+  ## Deals with initial indentation level
+  x.cursor = x.eatIndent 0
+  x.tokens.reset
+  x.initialIndent = x.indent
 
 
 # todo: not sure about that break jumping and checking for exceptions

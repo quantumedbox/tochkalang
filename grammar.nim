@@ -170,8 +170,7 @@ proc astBodyScope(s: var AstState, start: int): GrammarRet =
   ## New body scope that is opened by newline and new level of indentation
 
 
-# todo: dealing with indent
-# todo: eating newlines
+# todo: so error-prone, jeez
 proc astBody(s: var AstState, start: int): GrammarRet =
   ## +((expr newline)|(stmt newline))
   ## left side <- pair of expr|stmt or single expr|stmt
@@ -179,13 +178,22 @@ proc astBody(s: var AstState, start: int): GrammarRet =
   var builder: PairListBuilder
   var match: GrammarRet
   var cursor: int = start
+  let indent = s.indent
   while true:
     match = s.astExpr(cursor)
     if match.node.valid:
+      cursor = match.future
       builder.push(s, match.node)
-      if s[match.future].kind != tkNewline or not s[match.future].valid:
+      if not s[match.future].valid:
         break
-      else: cursor = match.future + 1
+      elif s[match.future].kind == tkNewIndent:
+        if s[match.future].vUint < indent:
+          s.indent = s[match.future].vUint # todo: it's really strange to set indent from within rule
+          cursor.inc
+          break
+        else:
+          raise newException(GrammarError, "invalid indentation within body")
+      else: cursor.inc
   if builder.node.valid:
     result.node = AstNode(
       kind: nkBody,
@@ -194,4 +202,3 @@ proc astBody(s: var AstState, start: int): GrammarRet =
 
 
 const astModule* = [astBody]
-# const astModule* = [astDef, astAssign]

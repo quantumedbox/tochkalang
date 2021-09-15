@@ -11,6 +11,10 @@ import lexer
 
 # todo: make that buffer capacity should grow in optimal/configurable chunks and not single elements
 
+# todo: possible optimization: store addresses of nodes within node branches, this way on sequence indexing
+#       you wouldn't need calculating offset from base and bound check
+#       safety-wise it should be okay as nodes do not permanently allocate unless they're successful at which point they're static
+
 
 type
   AstKind* = enum
@@ -47,7 +51,7 @@ type
     nodes*: seq[AstNode]
     # cursor*: int        # Position in tokens
     entries*: seq[int]    # Indexes of 'nodes' that are top-most
-    indent*: int
+    indent*: uint
 
   GrammarRet* = tuple[node: AstNode, future: int]
   GrammarError* = object of CatchableError
@@ -85,6 +89,7 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
   var s: AstState
   shallowCopy s.source, x.source
   shallowCopy s.tokens, x.tokens
+  s.indent = x.initialIndent
   s.nodes.add AstNode(kind: nkNone) # dummy node that is reserved for 'null'
   try:
     var ret: GrammarRet
@@ -92,7 +97,6 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
     while not s.isEnd(cursor):
       for rule in rules:
         ret = s.rule(cursor)
-        echo ret.future
         if ret.node.valid:
           if ret.future <= cursor:
             raise newException(GrammarError, "infinite recursion prevented as future cursor is equal or less of present")

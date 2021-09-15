@@ -22,6 +22,8 @@ export lexer
 # todo: should all tokens store their position in source? it might be helpful for constructing
 #       some debugging information, ast trees then could infer to source range
 
+# todo: maybe nkNewIndent should imply presence of nkNewline? as it cannot live without it
+
 
 func lexIdent(x: Lexer): LexRet =
   if x.current.isLetter:
