@@ -1,0 +1,61 @@
+-- playground for developing feel of the lang and its possible features
+
+
+value string = "test"
+
+my_func proc: string =
+  cond value == "test":
+    "it is indeed test"
+  else:
+    "something something"
+
+  cond
+  of a.valid:
+    "a"
+  of b.valid:
+    "b"
+  else:
+    "nothing"
+
+
+arg_func proc:
+  a: int
+  -> float =
+  .= a.float.sqrt
+  .+ 0.4
+
+mytype object:
+  a: int
+  b: string
+
+mytypefn proc:
+  a: mytype
+  -> string = a.b
+
+anothert proc:
+  a: mytype
+  -> int =
+  with a:
+    .a * .a
+
+anothert proc[a: mytype] -> int: a.a * a.a
+
+value mytype = mytype:
+  a: 6
+  b: # in this case it's keyword args for type construction
+    .= "init" # and bodies of keywords are accessed from 'with' body of certain type
+    .add " me" # they shouldn't have 'return'
+
+call:         # list call
+  arg         # passing of value as argument for call
+  function:   # nested list calls are allowed
+    nestedarg
+    "huh"
+  keyword: 74 # one problem - with this convention keywords can conflict with other names
+  :keyword: 1 # possible solution - require some prefix for keywords, but this way constructors will be affected
+
+# there should be alternative for more conventional nesting call
+# as in most cases list call will be more clunky
+call[arg, function[nestedarg, "huh"], keyword: 74]
+
+mydict dict[int, string] = [[1, "string"]]

@@ -6,6 +6,10 @@ import std/[strutils, macros]
 #       this way checking for EOF can be done via the same methods as other tokens
 #       and not cursor/bound checks
 
+# todo: storing everything in a single array rises a problem:
+#       big sequence could take noticeable time for reallocation
+#       we could introduce growing parallel array structure
+
 type
   TokenKind* = enum
     tkNone,                     # Default for not triggering error by clear initialization

@@ -1,4 +1,4 @@
-import lexing, grammar
+import lexing, grammar, cimpl
 
 let src = stdin.readAll
 let x = tokenize(src, lexModule)

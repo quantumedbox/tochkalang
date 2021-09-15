@@ -18,6 +18,10 @@ import lexer
 # todo: 'sequence node kinds' should act as pairs without need of incorporating pair at top level
 #       for example list and body can be 'sequence' kinds as they only store sequences of children
 
+# todo: storing everything in a single array rises a problem:
+#       big sequence could take noticeable time for reallocation
+#       we could introduce growing parallel array structure
+
 type
   AstKind* = enum
     nkNone,
@@ -86,7 +90,7 @@ func emplace*(s: var AstState, n: AstNode): int =
 
 
 func letgo*(s: var AstState, i: Natural) =
-  s.nodes.setLen(i)
+  s.nodes.setLen i
 
 
 func valid*(n: AstNode): bool =
