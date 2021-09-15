@@ -1,6 +1,4 @@
-import strutils
 import lexer
-
 
 # todo: show more detailed information about errors and AstState
 

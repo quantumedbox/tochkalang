@@ -1,41 +1,47 @@
 
 type
   Id* = distinct uint
-  RetainSeq*[T: typed, P: Natural = 128u] = object
+  RetainSeqSized*[I: static[uint], T] = object
     ## Structure that preserves indexes of holding objects
     ## and stores them in constant size pages
     ## Warn! After deletion id of old objects shouldn't be used to access it
     ##       make sure that it isn't possible
-    data: seq[array[P, T]] # sequence of page arrays
+    data: seq[ptr array[I, T]] # sequence of page arrays
     size: uint
-    vacant: seq[uint] # Free spots in underlying data
+    vacant: seq[Id] # free spots in underlying data
 
+  RetainSeq*[T] = RetainSeqSized[128u, T]
+
+
+proc add*[I, T](s: var RetainSeqSized[I, T], v: T): Id =
+  if s.vacant.len > 0:
+    let spot = s.vacant[s.vacant.high]
+    let page = spot.uint div I
+    let idx = spot.uint mod I
+    s.data[page][idx] = v
+    s.vacant.setLen s.vacant.high
+    result = spot.Id
+  else:
+    let page = s.size div I
+    let idx = s.size mod I
+    if idx == 0:
+      s.data.add createU(array[I, T])
+    s.data[page][idx] = v
+    result = s.size.Id
+    s.size.inc
 
 {.push inline.}
 
-func add*[T, P](s: RetainSeq[T, P], v: sink T): Id =
-  if s.vacant.len > 0:
-    let spot = s.vacant[s.vacant.high]
-    let page = spot div P
-    let idx = spot mod P
-    s.data[page][idx] = v
-    s.vacant.setLen s.vacant.high
-    spot
-  else:
-    let page = s.size div P
-    let idx = s.size mod P
-    if idx == 0:
-      s.data.add default[array[P, T]]()
-    s.data[page][idx] = v
-    result = s.size
-    s.size.inc
+# todo: should it bound check?
+func `[]`*[I, T](s: var RetainSeqSized[I, T], i: Id): T =
+  s.data[i.uint div I][i.uint mod I]
 
 # todo: should it bound check?
-func `[]`*[T, P](s: RetainSeq[T, P], i: Id): T =
-  s.data[s.size div i][s.size mod i]
-
-# todo: should it bound check?
-func erase*[T, P](s: RetainSeq[T, P], i: Id) =
+func erase*[I, T](s: var RetainSeqSized[I, T], i: Id) =
   s.vacant.add i
 
 {.pop.}
+
+proc `=destroy`[I, T](s: var RetainSeqSized[I, T]) =
+  for p in s.data:
+    dealloc(p)

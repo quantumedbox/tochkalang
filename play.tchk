@@ -1,4 +1,13 @@
--- playground for developing feel of the lang and its possible features
+# playground for developing feel of the lang and its possible features
+
+
+#[ philosophy and goals
+
+    semantics matter:
+      language should prioritize consistent ways of expression that are as much stable throughout as possible
+      this includes way of thinking about objects
+      for example, there's no much need to have special syntax for constructors - they might follow typical function call semantics
+]#
 
 
 value string = "test"
@@ -43,7 +52,7 @@ anothert proc[a: mytype] -> int: a.a * a.a
 value mytype = mytype:
   a: 6
   b: # in this case it's keyword args for type construction
-    .= "init" # and bodies of keywords are accessed from 'with' body of certain type
+    .= "init"  # and bodies of keywords are accessed from 'with' body of certain type
     .add " me" # they shouldn't have 'return'
 
 call:         # list call
