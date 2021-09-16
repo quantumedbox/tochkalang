@@ -13,12 +13,12 @@ type
     stSequence,
   SemType* = object
     name: string      # 
-    base: SemTypeKind # inheritance from built-in type
+    base: SemTypeKind # type implementation
   SemExpr* = object
     semType: Id       # SemType
   SemScope* = object
   SemState* = object
-    ## Semantic state handler that encapsulates structs of certain types in structure-of-array fashion
+    ## Semantic state handler that encapsulates semantics objects in structure-of-array fashion
     source: string
     nodes: seq[AstNode]
 

@@ -10,10 +10,16 @@ type
     size: uint
     vacant: seq[Id] # free spots in underlying data
 
+  # PageSeqSized*[I: static[uint], T] = object
+  #   ## Sequence of paged data for chunk allocation
+  #   data: seq[ptr array[I, T]]
+  #   size: uint
+
   RetainSeq*[T] = RetainSeqSized[128u, T]
+  # PageSeq*[T] = PageSeqSized[128u, T]
 
 
-proc add*[I, T](s: var RetainSeqSized[I, T], v: T): Id =
+proc push*[I, T](s: var RetainSeqSized[I, T], v: T): Id =
   if s.vacant.len > 0:
     let spot = s.vacant[s.vacant.high]
     let page = spot.uint div I
@@ -42,6 +48,6 @@ func erase*[I, T](s: var RetainSeqSized[I, T], i: Id) =
 
 {.pop.}
 
-proc `=destroy`[I, T](s: var RetainSeqSized[I, T]) =
+func `=destroy`[I, T](s: var RetainSeqSized[I, T]) =
   for p in s.data:
     dealloc(p)

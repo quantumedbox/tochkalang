@@ -9,6 +9,9 @@
       for example, there's no much need to have special syntax for constructors - they might follow typical function call semantics
 ]#
 
+# what about usage of special symbol for protected and implementation dependent names?
+# this way we can say that this function should override something and if doesn't - it's an error
+!hash proc: ...
 
 value string = "test"
 

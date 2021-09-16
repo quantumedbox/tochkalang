@@ -56,6 +56,10 @@ func lexKeyword(x: Lexer): LexRet =
     future.inc
   if x.view(future) == "if":
     (Token(kind: tkIf), future)
+  elif x.view(future) == "elif":
+    (Token(kind: tkElif), future)
+  elif x.view(future) == "else":
+    (Token(kind: tkElse), future)
   else:
     (Token(kind: tkError), 0)
 

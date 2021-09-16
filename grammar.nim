@@ -139,16 +139,42 @@ func astDef(s: var AstState, start: int): GrammarRet =
 
 
 func astIfExpr(s: var AstState, start: int): GrammarRet =
-  if s[start].kind == tkIf:
-    let exprMatch = s.astExpr(start + 1)
+  ## if expr :body *(elif expr :body) ?(else :body)
+  var
+    cursor = start
+    exprMatch: GrammarRet
+    bodyMatch: GrammarRet
+    branches: PairListBuilder
+
+  if s[cursor].kind == tkIf:
+    exprMatch = s.astExpr(cursor + 1)
     if exprMatch.node.valid:
-      let bodyMatch = s.astColonBody exprMatch.future
+      bodyMatch = s.astColonBody(exprMatch.future)
       if bodyMatch.node.valid:
-        result.node = AstNode(
-          kind: nkIfExpr,
-          left: s.emplace exprMatch.node,
-          right: s.emplace bodyMatch.node)
-        result.future = bodyMatch.future
+        cursor = bodyMatch.future
+        branches.push(s, AstNode(kind: nkIfBranch, left: bodyMatch.node.left, right: bodyMatch.node.right))
+        while true:
+          case s[cursor].kind:
+          of tkElif:
+            exprMatch = s.astExpr(cursor + 1)
+            if exprMatch.node.valid:
+              bodyMatch = s.astColonBody(exprMatch.future)
+              if bodyMatch.node.valid:
+                branches.push(s, AstNode(kind: nkElifBranch, left: bodyMatch.node.left, right: bodyMatch.node.right))
+                cursor = bodyMatch.future
+              else: raise newException(GrammarError, "'elif' should be followed by colon body")
+            else: raise newException(GrammarError, "'elif' should have expression attached")
+          of tkElse:
+            bodyMatch = s.astColonBody(cursor + 1)
+            if bodyMatch.node.valid:
+              branches.push(s, AstNode(kind: nkElseBranch, left: bodyMatch.node.left, right: bodyMatch.node.right))
+              cursor = bodyMatch.future
+              break
+            else: raise newException(GrammarError, "'else' should be followed by colon body")
+          else: break
+        result.node = AstNode(kind: nkIfExpr, left: branches.node.left, right: branches.node.right)
+        result.future = cursor
+    else: raise newException(GrammarError, "'if' should have expression attached")
 
 
 func astColonBody(s: var AstState, start: int): GrammarRet =

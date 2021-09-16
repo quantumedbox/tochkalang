@@ -23,7 +23,8 @@ type
     tkAssign,                   # '='
     tkColon,                    # ':' Used for opening scopes and specifying return type
     tkListOpen, tkListClose,    # '[', ']'
-    tkIf,
+    tkIf, tkElif, tkElse,
+    tkCond, tkCase, tkOf,
 
   TokenValueKind* = enum
     tvNone,

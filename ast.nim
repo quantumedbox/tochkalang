@@ -35,6 +35,7 @@ type
     nkAssign,
     nkDef,
     nkIfExpr,
+    nkIfBranch, nkElifBranch, nkElseBranch,
 
   AstNode* = object
     kind*: AstKind
