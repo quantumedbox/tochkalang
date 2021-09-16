@@ -63,8 +63,9 @@ type
   GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 
 const
-  EmptyIndex: int = 0
+  EmptyIndex*: int = 0
   ScopedNodes* = {nkBody, nkIfExpr}
+  SequenceNodes* = {nkPair, nkBody, nkIfExpr}
 
 
 {.push inline.}

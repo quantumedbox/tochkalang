@@ -28,10 +28,17 @@ func astDef(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, ra
 func astIfExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 func astBody(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 func astColonBody(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+func astAssign(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 
 
+# todo: better names, lol
 type
   PairListBuilder = object
+    bottom*: int    # Points towards bottom-most allocated node
+    node*: AstNode  # Node for which tree is built
+
+  PairSeqBuilder = object
+    ## Builder for pair-like nodes that have sequences as their sides
     bottom*: int    # Points towards bottom-most allocated node
     node*: AstNode  # Node for which tree is built
 
@@ -44,6 +51,20 @@ func push(a: var PairListBuilder, s: var AstState, n: AstNode) {.inline.} =
       kind: nkPair,
       left: s.emplace a.node,
       right: s.emplace n)
+    a.bottom = a.node.right
+  else:
+    s.nodes[a.bottom] = AstNode(
+      kind: nkPair,
+      left: s.emplace s.nodes[a.bottom],
+      right: s.emplace n)
+    a.bottom = s.nodes[a.bottom].right
+
+
+func push(a: var PairSeqBuilder, s: var AstState, n: AstNode) {.inline.} =
+  if a.node.left == EmptyIndex:
+    a.node.left = s.emplace(n)
+  elif a.node.right == EmptyIndex:
+    a.node.right = s.emplace(n)
     a.bottom = a.node.right
   else:
     s.nodes[a.bottom] = AstNode(
@@ -125,17 +146,26 @@ func astDef(s: var AstState, start: int): GrammarRet =
     result.node.kind = nkDef
     result.node.head = s[start].head
     result.node.tail = s[start].tail
-    result.node.left = s.emplace(
-      AstNode(
-        kind: nkIdent,
-        head: s[start + 1].head,
-        tail: s[start + 1].tail))
+    result.node.left = s.emplace(AstNode(kind: nkIdent, head: s[start + 1].head, tail: s[start + 1].tail))
     result.future = start + 2
     if s[start + 2].kind == tkAssign:
       let match = s.astExpr(start + 3)
       if match.node.valid:
         result.node.right = s.emplace match.node
         result.future = match.future
+
+
+func astAssign(s: var AstState, start: int): GrammarRet =
+  ## ident = expr
+  ## left side <- expr
+  if s[start].kind == tkIdent and s[start + 1].kind == tkAssign:
+    let match = s.astExpr(start + 2)
+    if match.node.valid:
+      result.node.kind = nkAssign
+      result.node.head = s[start].head
+      result.node.tail = s[start].tail
+      result.node.left = s.emplace match.node
+      result.future = match.future
 
 
 func astIfExpr(s: var AstState, start: int): GrammarRet =
@@ -197,7 +227,7 @@ func astBody(s: var AstState, start: int): GrammarRet =
       builder.push(s, match.node)
       cursor = match.future
       let cur = s[match.future]
-      if not cur.valid: break # eof?
+      if not cur.valid: break # eof
       elif cur.kind == tkNewIndent:
         if cur.vUint < indent:
           s.indent = cur.vUint # todo: it's really strange to set indent from within rule
@@ -212,19 +242,18 @@ func astBody(s: var AstState, start: int): GrammarRet =
       continue # start new matching round
 
   var
-    builder: PairListBuilder
+    builder: PairSeqBuilder
     cursor = start
   let indent = s.indent
   while true:
     matchVariant astIfExpr
     matchVariant astDef
+    matchVariant astAssign
     matchVariant astExpr
 
-  if builder.node.valid:
+  if builder.node.left != EmptyIndex:
     # debugEcho s.nodeToString(builder.node)
-    result.node = AstNode(
-      kind: nkBody,
-      left: s.emplace builder.node)
+    result.node = AstNode(kind: nkBody, left: builder.node.left, right: builder.node.right)
     result.future = cursor
 
 

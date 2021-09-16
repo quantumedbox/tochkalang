@@ -71,3 +71,13 @@ call:         # list call
 call[arg, function[nestedarg, "huh"], keyword: 74]
 
 mydict dict[int, string] = [[1, "string"]]
+
+# interesting side effect:
+# usage of . in with block can be used for differentiation of statements/expressions
+# tho it's kinda bad
+value = with a: .doThis[2] .doThat .huh
+
+# type as argument of with can be used for opening it with a new value of type
+v string = with string:
+  .= "base"
+  .add "other"
