@@ -1,12 +1,15 @@
 # playground for developing feel of the lang and its possible features
 
 
-#[ philosophy and goals
+# todo: i hate this multi-line comment syntax
+#[ 
+  philosophy and goals
 
     semantics matter:
       language should prioritize consistent ways of expression that are as much stable throughout as possible
       this includes way of thinking about objects
       for example, there's no much need to have special syntax for constructors - they might follow typical function call semantics
+
 ]#
 
 # what about usage of special symbol for protected and implementation dependent names?
@@ -64,7 +67,7 @@ call:         # list call
     nestedarg
     "huh"
   keyword: 74 # one problem - with this convention keywords can conflict with other names
-  :keyword: 1 # possible solution - require some prefix for keywords, but this way constructors will be affected
+  'keyword: 1 # possible solution - require some prefix for keywords, but this way constructors will be affected
 
 # there should be alternative for more conventional nesting call
 # as in most cases list call will be more clunky
@@ -81,3 +84,15 @@ value = with a: .doThis[2] .doThat .huh
 v string = with string:
   .= "base"
   .add "other"
+
+# implementation-wise - even type definition should be parsed the same way list calls and function defs are parsed
+nodeKind enum:
+  -> uint32 # we also could reuse function return symbol for specifying underlying enum value type
+  what
+  is
+  this
+
+myenum enum -> int: ... # probably -> doesn't fit in lists and should be in 'header'
+
+# i would like to have them always pure and namespaced
+test auto = nodeKind.what

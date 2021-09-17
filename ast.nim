@@ -24,7 +24,7 @@ type
   AstKind* = enum
     nkNone,
     nkError,
-    nkPair,       # Special kind for implementing lists within buffer
+    nkPair,   # Special kind for implementing lists within buffer
     nkIdent,
     nkKeyword,
     nkInt,
@@ -34,8 +34,7 @@ type
     nkList,
     nkAssign,
     nkDef,
-    nkIfExpr,
-    nkIfBranch, nkElifBranch, nkElseBranch,
+    nkIfExpr, #[ if-elif-else structure ]# nkIfBranch, nkElifBranch, nkElseBranch,
 
   AstNode* = object
     kind*: AstKind
@@ -68,30 +67,33 @@ const
   SequenceNodes* = {nkPair, nkBody, nkIfExpr}
 
 
+template raiseGrammarError*(msg: string): untyped =
+  raise newException(GrammarError, msg)
+
+
 {.push inline.}
 
-func `[]`*(s: AstState, i: Natural): Token =
+func initAst*(kind: AstKind, left, right, head = 0, tail: int = 0): AstNode =
+  AstNode(kind: kind, left: left, right: right, head: head, tail: tail)
+
+func `[]`*(s: AstState, i: Natural): lent Token =
   if i in s.tokens.low..s.tokens.high:
-    s.tokens[i]
+    result = s.tokens[i]
   else:
-    Token(kind: tkError)
+    result = s.tokens[0] # 0 index always has tkNone
 
-func lastNode*(s: AstState): AstNode =
-  s.nodes[s.nodes.high]
-
+# func lastNode*(s: AstState): AstNode =
+#   s.nodes[s.nodes.high]
 
 func isEnd*(s: AstState, i: Natural): bool =
   i >= s.tokens.len
-
 
 func emplace*(s: var AstState, n: AstNode): int =
   s.nodes.add n
   s.nodes.high
 
-
 func letgo*(s: var AstState, i: Natural) =
   s.nodes.setLen i
-
 
 func valid*(n: AstNode): bool =
   n.kind != nkError and n.kind != nkNone
@@ -107,7 +109,7 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
   s.nodes.add AstNode(kind: nkNone) # dummy node that is reserved for 'null'
   try:
     var ret: GrammarRet
-    var cursor: int
+    var cursor: int = 1
     while not s.isEnd(cursor):
       for rule in rules:
         ret = s.rule(cursor)
@@ -148,3 +150,65 @@ func `$`*(s: AstState): string =
     result.add s.nodeToString(s.nodes[entry])
     if e != s.entries.high:
       result.add '\n'
+
+## Rule btilities
+
+func ruleAny*(s: var AstState, start: int, defs: varargs[GrammarDef]): GrammarRet {.inline.} =
+  for def in defs:
+    let match = s.def(start)
+    if match.node.valid: return match
+
+
+## Pair tree building utilities
+
+# todo: better names, lol
+type
+  PairListBuilder* = object
+    bottom*: int    # Points towards bottom-most allocated node
+    node*: AstNode  # Node for which tree is built
+
+func push*(a: var PairListBuilder, s: var AstState, n: sink AstNode) {.inline.} =
+  if a.node.kind == nkNone:
+    a.node = n
+  elif a.node.kind != nkPair:
+    a.node = initAst(nkPair, s.emplace(a.node), s.emplace(n))
+    a.bottom = a.node.right
+  else:
+    s.nodes[a.bottom] = initAst(nkPair, s.emplace(s.nodes[a.bottom]), s.emplace(n))
+    a.bottom = s.nodes[a.bottom].right
+
+template push*(a: var PairListBuilder, s: var AstState, kind: AstKind, left, right, head = 0, tail: int = 0): untyped =
+  a.push(s, initAst(kind, left, right, head, tail))
+
+template push*(a: var PairListBuilder, s: var AstState, kind: AstKind, n: AstNode): untyped =
+  a.push(s, initAst(kind, n.left, n.right, n.head, n.tail))
+
+
+type
+  PairSeqBuilder* = object
+    ## Builder for pair-like nodes that have sequences as their sides
+    bottom*: int    # Points towards bottom-most allocated node
+    node*: AstNode  # Node for which tree is built
+
+func initPairSeqBuilder(kind: AstKind): PairSeqBuilder {.inline.} =
+  result.node.kind = kind
+
+func push*(a: var PairSeqBuilder, s: var AstState, n: sink AstNode) {.inline.} =
+  if a.node.left == EmptyIndex:
+    a.node.left = s.emplace(n)
+  elif a.node.right == EmptyIndex:
+    a.node.right = s.emplace(n)
+    a.bottom = a.node.right
+  else:
+    s.nodes[a.bottom] = initAst(nkPair, s.emplace(s.nodes[a.bottom]), s.emplace(n))
+    a.bottom = s.nodes[a.bottom].right
+
+func consumeToPairSeq*(s: var AstState, kind: AstKind, def: GrammarDef, start: int): GrammarRet =
+  result.future = start
+  var builder = initPairSeqBuilder(kind)
+  var match = s.def(result.future)
+  while match.node.valid:
+    builder.push(s, match.node)
+    result.future = match.future
+    match = s.def(result.future)
+  result.node = builder.node

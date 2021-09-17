@@ -13,12 +13,19 @@ export ast
 # todo: maybe errors should return their start too? can be more than just convenient
 
 # todo: macro system for implementation of rules, otherwise it's extremely bug prone and monotonous
-## example:
-# astRule: "list"
-#   nkList:
-#     nkListOpen
-#     left <- *expr
-#     nkListClose
+# example:
+# astRule assign:
+#   variant(left: rule.ident, tkAssign, right: rule.expr):
+#     Token(kind: nkAssign, left: left, right: right)
+#   variant(left: rule.list, tkAssign, right: rule.expr):
+#     Token(kind: nkAssign, left: left, right: right)
+
+# astRule list:
+#   variant(tkListOpen, pairs: sequence.expr, tkListClose):
+#     Token(kind: nkList, left: pairs.left, right: pairs.right)
+
+
+# todo: maybe we can make error handling without using exception, but with regular function flow?
 
 
 # todo: way of standardized forward declaration by just names
@@ -31,78 +38,8 @@ func astColonBody(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffe
 func astAssign(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 
 
-# todo: better names, lol
-type
-  PairListBuilder = object
-    bottom*: int    # Points towards bottom-most allocated node
-    node*: AstNode  # Node for which tree is built
-
-  PairSeqBuilder = object
-    ## Builder for pair-like nodes that have sequences as their sides
-    bottom*: int    # Points towards bottom-most allocated node
-    node*: AstNode  # Node for which tree is built
-
-
-func push(a: var PairListBuilder, s: var AstState, n: AstNode) {.inline.} =
-  if a.node.kind == nkNone:
-    a.node = n
-  elif a.node.kind != nkPair:
-    a.node = AstNode(
-      kind: nkPair,
-      left: s.emplace a.node,
-      right: s.emplace n)
-    a.bottom = a.node.right
-  else:
-    s.nodes[a.bottom] = AstNode(
-      kind: nkPair,
-      left: s.emplace s.nodes[a.bottom],
-      right: s.emplace n)
-    a.bottom = s.nodes[a.bottom].right
-
-
-func push(a: var PairSeqBuilder, s: var AstState, n: AstNode) {.inline.} =
-  if a.node.left == EmptyIndex:
-    a.node.left = s.emplace(n)
-  elif a.node.right == EmptyIndex:
-    a.node.right = s.emplace(n)
-    a.bottom = a.node.right
-  else:
-    s.nodes[a.bottom] = AstNode(
-      kind: nkPair,
-      left: s.emplace s.nodes[a.bottom],
-      right: s.emplace n)
-    a.bottom = s.nodes[a.bottom].right
-
-
-# todo: make use of builder?
-func consumePairs(s: var AstState, def: GrammarDef, start: int): GrammarRet =
-  ## Generic pair constructor that packs successful calls into nkPair tree
-  result = s.def(start)
-  if result.node.valid:
-    # if second match - construct pair of two matches
-    let second = s.def(result.future)
-    if second.node.valid:
-      result.future = second.future
-      result.node = AstNode(
-        kind: nkPair,
-        left: s.emplace(result.node),
-        right: s.emplace(second.node))
-      var bottom = result.node.right
-      for token in s.stream(second.future):
-        # all consequent matches work on right sides of most bottom current pair
-        let other = s.def(result.future)
-        if other.node.valid:
-          result.future = other.future
-          s.nodes[bottom] = AstNode(
-            kind: nkPair,
-            left: s.emplace(s.nodes[bottom]),
-            right: s.emplace(other.node))
-          bottom = s.nodes[bottom].right
-        else: break
-
-
 func astExpr(s: var AstState, start: int): GrammarRet =
-  ## +(ident|int|string|list)
+  ## ident | int | string | list
   template setPrimitive(k: AstKind) =
     result.node.kind = k
     result.node.head = s[start].head
@@ -114,24 +51,57 @@ func astExpr(s: var AstState, start: int): GrammarRet =
   of tkInt: setPrimitive nkInt
   of tkString: setPrimitive nkString
   of tkListOpen: result = s.astList(start)
-  of tkIf: result = s.astIfExpr(start)
-  else: discard #result.node.kind = nkError
+  else: discard
 
 
-# todo: base list node can act as pair by itself, this way we can reduce the amount of nodes
+func astIfExpr(s: var AstState, start: int): GrammarRet =
+  ## if expr :body *(elif expr :body) ?(else :body)
+  var
+    branches: PairListBuilder
+    exprMatch: GrammarRet
+    bodyMatch: GrammarRet
+
+  if s[start].kind == tkIf:
+    debugEcho start, s[start + 2].kind
+    exprMatch = s.astExpr(start + 1)
+    if exprMatch.node.valid:
+      bodyMatch = s.astColonBody(exprMatch.future)
+      if bodyMatch.node.valid:
+        branches.push(s, initAst(nkIfBranch, s.emplace(exprMatch.node), s.emplace(bodyMatch.node)))
+        # consume all elif branches
+        while s[bodyMatch.future].kind == tkElif:
+          exprMatch = s.astExpr(bodyMatch.future + 1)
+          if exprMatch.node.valid:
+            bodyMatch = s.astColonBody(exprMatch.future)
+            if bodyMatch.node.valid:
+              branches.push(s, initAst(nkElifBranch, s.emplace(exprMatch.node), s.emplace(bodyMatch.node)))
+            else: raiseGrammarError("'elif' should be followed by colon body")
+          else: raiseGrammarError("'elif' should have expression attached")
+        # optional else branch
+        if s[bodyMatch.future].kind == tkElse:
+          bodyMatch = s.astColonBody(bodyMatch.future + 1)
+          if bodyMatch.node.valid:
+            branches.push(s, nkElseBranch, bodyMatch.node)
+          else: raiseGrammarError("'else' should be followed by colon body")
+        # result node is pair tree of branches
+        result.node = branches.node
+        result.node.kind = nkIfExpr
+        result.future = bodyMatch.future
+    else: raiseGrammarError("'if' should have expression attached")
+
+
 func astList(s: var AstState, start: int): GrammarRet =
   ## [?expr *expr]
   ## left side <- elems of list
   let ghost = s.nodes.len
   if s[start].kind == tkListOpen:
-    let exprs = s.consumePairs(astExpr, start + 1)
-    if exprs.node.valid:
-      if s[exprs.future].kind == tkListClose:
-        result.future = exprs.future + 1
-        result.node.kind = nkList
-        result.node.left = s.emplace(exprs.node)
+    let exprList = s.consumeToPairSeq(nkList, astExpr, start + 1)
+    if exprList.node.valid:
+      if s[exprList.future].kind == tkListClose:
+        result.future = exprList.future + 1
+        result.node = exprList.node
       else:
-        # call to consumePairs can allocate nodes, so we should clear them if list wasn't constructed
+        # call to consumeToPairSeq can allocate nodes, so we should clear them if list wasn't constructed
         s.letgo ghost
     elif s[start + 1].kind == tkListClose:
         result.future = start + 2
@@ -156,55 +126,17 @@ func astDef(s: var AstState, start: int): GrammarRet =
 
 
 func astAssign(s: var AstState, start: int): GrammarRet =
-  ## ident = expr
-  ## left side <- expr
+  ## ident = (expr | ifExpr)
+  ## left side <- ident
+  ## right side <- expr
   if s[start].kind == tkIdent and s[start + 1].kind == tkAssign:
-    let match = s.astExpr(start + 2)
+    # let match = s.astExpr(start + 2)
+    let match = s.ruleAny(start + 2, astExpr, astIfExpr)
     if match.node.valid:
       result.node.kind = nkAssign
-      result.node.head = s[start].head
-      result.node.tail = s[start].tail
-      result.node.left = s.emplace match.node
+      result.node.left = s.emplace AstNode(kind: nkIdent, head: s[start].head, tail: s[start].tail)
+      result.node.right = s.emplace match.node
       result.future = match.future
-
-
-func astIfExpr(s: var AstState, start: int): GrammarRet =
-  ## if expr :body *(elif expr :body) ?(else :body)
-  var
-    cursor = start
-    exprMatch: GrammarRet
-    bodyMatch: GrammarRet
-    branches: PairListBuilder
-
-  if s[cursor].kind == tkIf:
-    exprMatch = s.astExpr(cursor + 1)
-    if exprMatch.node.valid:
-      bodyMatch = s.astColonBody(exprMatch.future)
-      if bodyMatch.node.valid:
-        cursor = bodyMatch.future
-        branches.push(s, AstNode(kind: nkIfBranch, left: bodyMatch.node.left, right: bodyMatch.node.right))
-        while true:
-          case s[cursor].kind:
-          of tkElif:
-            exprMatch = s.astExpr(cursor + 1)
-            if exprMatch.node.valid:
-              bodyMatch = s.astColonBody(exprMatch.future)
-              if bodyMatch.node.valid:
-                branches.push(s, AstNode(kind: nkElifBranch, left: bodyMatch.node.left, right: bodyMatch.node.right))
-                cursor = bodyMatch.future
-              else: raise newException(GrammarError, "'elif' should be followed by colon body")
-            else: raise newException(GrammarError, "'elif' should have expression attached")
-          of tkElse:
-            bodyMatch = s.astColonBody(cursor + 1)
-            if bodyMatch.node.valid:
-              branches.push(s, AstNode(kind: nkElseBranch, left: bodyMatch.node.left, right: bodyMatch.node.right))
-              cursor = bodyMatch.future
-              break
-            else: raise newException(GrammarError, "'else' should be followed by colon body")
-          else: break
-        result.node = AstNode(kind: nkIfExpr, left: branches.node.left, right: branches.node.right)
-        result.future = cursor
-    else: raise newException(GrammarError, "'if' should have expression attached")
 
 
 func astColonBody(s: var AstState, start: int): GrammarRet =
@@ -215,12 +147,10 @@ func astColonBody(s: var AstState, start: int): GrammarRet =
       result = s.astBody(start + 2)
 
 
-# todo: so error-prone, jeez
-# todo: quite possibly might need 'letgo' call
-# todo: better to restructure this
+# todo: SHOULD BE TOTALLY REDONE
+# todo: fix bug with inability to leave function on invalid input
 func astBody(s: var AstState, start: int): GrammarRet =
-  ## +(def|expr)
-  ## left side <- pair of expr|stmt or single expr|stmt
+  ## +(astIfExpr | astDef | astAssign | astExpr)
   template matchVariant(rule: GrammarDef) =
     let match = s.rule(cursor)
     if match.node.valid:
@@ -234,7 +164,7 @@ func astBody(s: var AstState, start: int): GrammarRet =
           cursor.inc
           break
         else:
-          raise newException(GrammarError, "invalid indentation within body")
+          raiseGrammarError("invalid indentation within body")
       elif cur.kind == tkNewline: # nested scopes delete newlines, so, we have to check
         cursor.inc
       elif match.node.kind in ScopedNodes: discard
@@ -250,10 +180,14 @@ func astBody(s: var AstState, start: int): GrammarRet =
     matchVariant astDef
     matchVariant astAssign
     matchVariant astExpr
+    if not s.isEnd(cursor):
+      raiseGrammarError("unexpected token " & $s[cursor].kind & " at position " & $cursor)
+    else: break
 
   if builder.node.left != EmptyIndex:
     # debugEcho s.nodeToString(builder.node)
-    result.node = AstNode(kind: nkBody, left: builder.node.left, right: builder.node.right)
+    # result.node = AstNode(kind: nkBody, left: builder.node.left, right: builder.node.right)
+    result.node = initAst(nkBody, builder.node.left, builder.node.right)
     result.future = cursor
 
 

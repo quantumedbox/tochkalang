@@ -59,9 +59,6 @@ type
 const
   EndChar* = '\0' # todo: not sure about char choise, maybe unicode has something for that
   IndentChar* = ' '
-
-  # todo: all reserved words should be their own token
-  # ReservedWords* = ["mut", "type", "cond", "if"] # should only consist of isLetter chars
   ExportMarker* = '*'
   StringMarker* = '"'
 
@@ -99,6 +96,16 @@ template push(a: KeywordTreeNode): untyped =
 
 template view*(x: Lexer, future: int): auto =
   toOpenArray(x.source, x.cursor, x.cursor + future - 1)
+
+
+func eatIndent(x: var Lexer, start: int): int
+func initLexer(source: sink string): Lexer =
+  result.source = source
+  result.lineno = 1
+  result.cursor = result.eatIndent 0
+  result.tokens.reset
+  result.tokens.add Token(kind: tkNone)
+  result.initialIndent = result.indent
 
 
 {.push inline, noSideEffect.}
@@ -240,21 +247,12 @@ func eatSpace*(x: var Lexer) =
   x.cursor = cursor
 
 
-func prepareSource*(x: var Lexer) =
-  ## Deals with initial indentation level
-  x.cursor = x.eatIndent 0
-  x.tokens.reset
-  x.initialIndent = x.indent
-
-
 # todo: not sure about that break jumping and checking for exceptions
 func stateInfo(x: Lexer): string
-proc tokenize*(src: string, rules: openArray[LexDef]): Lexer =
-  var x = Lexer(lineno: 1)
-  shallowCopy x.source, src
+proc tokenize*(src: sink string, rules: openArray[LexDef]): Lexer =
+  var x = initLexer(src)
   try:
     var ret: LexRet
-    x.prepareSource
     while not x.atEnd:
       for rule in rules:
         ret = x.rule
@@ -279,6 +277,8 @@ func linepos*(x: Lexer): int =
 
 func `$`*(x: Lexer): string =
   for i, token in x.tokens:
+    result.add $i
+    result.add ": " # todo: line it up to certain common indentation
     result.add $token.kind
     if token.tail - token.head != 0:
       result.add " : "

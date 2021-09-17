@@ -19,7 +19,7 @@ type
   # PageSeq*[T] = PageSeqSized[128u, T]
 
 
-proc push*[I, T](s: var RetainSeqSized[I, T], v: T): Id =
+proc push*[I, T](s: var RetainSeqSized[I, T], v: sink T): Id =
   if s.vacant.len > 0:
     let spot = s.vacant[s.vacant.high]
     let page = spot.uint div I
