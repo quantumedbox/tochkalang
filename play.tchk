@@ -10,7 +10,31 @@
       this includes way of thinking about objects
       for example, there's no much need to have special syntax for constructors - they might follow typical function call semantics
 
+      principle of treating everything as data flow
+
+      calling objects should be equal to any other objects
+      one way of making them closer to pure data is to rely on making their arguments/signatures
+        be based on named tuples, which totally makes sense for both calling and definitions
+      we can also think about functions as type constructors
+
+      name proc.decltype: named-tuple-def = body
+
+      function bodies themselves should be objects that could be constructed, but probably as 'static'
+
 ]#
+
+[] # call it constructor clause?
+this[a b] # this is object that constructs type from tuple or named tuple
+this a b  # tuple might be implied
+a.this b  # converted to "this [a b]"
+this:     # : starts tuple construction
+  a
+  b
+
+file auto = openFile "name" mode:read   # base operator syntax
+file auto = openFile["name" mode:read]  # can be rewritten with constructor clause, needed for chaining
+str string = file.readAll
+echo str
 
 # what about usage of special symbol for protected and implementation dependent names?
 # this way we can say that this function should override something and if doesn't - it's an error
@@ -18,8 +42,8 @@
 
 value string = "test"
 
-my_func proc: string =
-  cond value == "test":
+my_func proc.string =
+  if value == "test":
     "it is indeed test"
   else:
     "something something"
@@ -32,10 +56,8 @@ my_func proc: string =
   else:
     "nothing"
 
-
-arg_func proc:
-  a: int
-  -> float =
+arg_func proc.float:
+  a: int =
   .= a.float.sqrt
   .+ 0.4
 
@@ -43,13 +65,11 @@ mytype object:
   a: int
   b: string
 
-mytypefn proc:
-  a: mytype
-  -> string = a.b
+mytypefn proc.string:
+  a: mytype = a.b
 
-anothert proc:
-  a: mytype
-  -> int =
+anothert proc.int:
+  a: mytype =
   with a:
     .a * .a
 
@@ -66,8 +86,8 @@ call:         # list call
   function:   # nested list calls are allowed
     nestedarg
     "huh"
-  keyword: 74 # one problem - with this convention keywords can conflict with other names
-  'keyword: 1 # possible solution - require some prefix for keywords, but this way constructors will be affected
+  keyword: 74 # one problem - with this convention keywords can conflict with other names from scope
+  keyword: 1  # possible solution - require some prefix for keywords, but this way constructors will be affected
 
 # there should be alternative for more conventional nesting call
 # as in most cases list call will be more clunky
@@ -86,13 +106,12 @@ v string = with string:
   .add "other"
 
 # implementation-wise - even type definition should be parsed the same way list calls and function defs are parsed
-nodeKind enum:
-  -> uint32 # we also could reuse function return symbol for specifying underlying enum value type
+nodeKind enum.int32:
   what
   is
   this
 
-myenum enum -> int: ... # probably -> doesn't fit in lists and should be in 'header'
+myenum enum?.type: ... # probably -> doesn't fit in lists and should be in 'header'
 
 # i would like to have them always pure and namespaced
 test auto = nodeKind.what

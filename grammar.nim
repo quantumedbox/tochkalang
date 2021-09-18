@@ -28,7 +28,7 @@ export ast
 # todo: maybe we can make error handling without using exception, but with regular function flow?
 
 
-# todo: way of standardized forward declaration by just names
+# todo: shorten it
 func astExpr(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 func astList(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
 func astDef(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
@@ -62,12 +62,11 @@ func astIfExpr(s: var AstState, start: int): GrammarRet =
     bodyMatch: GrammarRet
 
   if s[start].kind == tkIf:
-    debugEcho start, s[start + 2].kind
     exprMatch = s.astExpr(start + 1)
     if exprMatch.node.valid:
       bodyMatch = s.astColonBody(exprMatch.future)
       if bodyMatch.node.valid:
-        branches.push(s, initAst(nkIfBranch, s.emplace(exprMatch.node), s.emplace(bodyMatch.node)))
+        branches.push(s, initAst(nkElifBranch, s.emplace(exprMatch.node), s.emplace(bodyMatch.node)))
         # consume all elif branches
         while s[bodyMatch.future].kind == tkElif:
           exprMatch = s.astExpr(bodyMatch.future + 1)
@@ -87,6 +86,7 @@ func astIfExpr(s: var AstState, start: int): GrammarRet =
         result.node = branches.node
         result.node.kind = nkIfExpr
         result.future = bodyMatch.future
+      else: raiseGrammarError("'if' should be followed by colon body")
     else: raiseGrammarError("'if' should have expression attached")
 
 
@@ -100,9 +100,7 @@ func astList(s: var AstState, start: int): GrammarRet =
       if s[exprList.future].kind == tkListClose:
         result.future = exprList.future + 1
         result.node = exprList.node
-      else:
-        # call to consumeToPairSeq can allocate nodes, so we should clear them if list wasn't constructed
-        s.letgo ghost
+      else: raiseGrammarError("list should have closing bracket")
     elif s[start + 1].kind == tkListClose:
         result.future = start + 2
         result.node.kind = nkList
@@ -116,7 +114,7 @@ func astDef(s: var AstState, start: int): GrammarRet =
     result.node.kind = nkDef
     result.node.head = s[start].head
     result.node.tail = s[start].tail
-    result.node.left = s.emplace(AstNode(kind: nkIdent, head: s[start + 1].head, tail: s[start + 1].tail))
+    result.node.left = s.emplace(initAst(nkIdent, s[start + 1].head, s[start + 1].tail))
     result.future = start + 2
     if s[start + 2].kind == tkAssign:
       let match = s.astExpr(start + 3)
@@ -125,70 +123,58 @@ func astDef(s: var AstState, start: int): GrammarRet =
         result.future = match.future
 
 
+# todo: it should use ifExprInline for possible ternary
 func astAssign(s: var AstState, start: int): GrammarRet =
   ## ident = (expr | ifExpr)
   ## left side <- ident
   ## right side <- expr
   if s[start].kind == tkIdent and s[start + 1].kind == tkAssign:
-    # let match = s.astExpr(start + 2)
-    let match = s.ruleAny(start + 2, astExpr, astIfExpr)
+    let match = s.ruleAny(start + 2, astIfExpr, astExpr)
     if match.node.valid:
       result.node.kind = nkAssign
-      result.node.left = s.emplace AstNode(kind: nkIdent, head: s[start].head, tail: s[start].tail)
+      result.node.left = s.emplace initAst(nkIdent, s[start].head, s[start].tail)
       result.node.right = s.emplace match.node
       result.future = match.future
 
 
 func astColonBody(s: var AstState, start: int): GrammarRet =
-  ## New body scope that is opened by colon, newline and new level of indentation
-  if s[start].kind == tkColon and s[start + 1].kind == tkNewIndent:
-    if s[start + 1].vUint == s.indent + 1:
-      s.indent.inc
+  if s[start].kind == tkColon and
+      s[start + 1].kind == tkNewIndent and
+      s[start + 1].vUint == s.indent + 1:
+    indentBlock s, s[start + 1].vUint:
       result = s.astBody(start + 2)
 
-
-# todo: SHOULD BE TOTALLY REDONE
-# todo: fix bug with inability to leave function on invalid input
 func astBody(s: var AstState, start: int): GrammarRet =
   ## +(astIfExpr | astDef | astAssign | astExpr)
-  template matchVariant(rule: GrammarDef) =
-    let match = s.rule(cursor)
-    if match.node.valid:
-      builder.push(s, match.node)
-      cursor = match.future
-      let cur = s[match.future]
-      if not cur.valid: break # eof
-      elif cur.kind == tkNewIndent:
-        if cur.vUint < indent:
-          s.indent = cur.vUint # todo: it's really strange to set indent from within rule
-          cursor.inc
-          break
-        else:
-          raiseGrammarError("invalid indentation within body")
-      elif cur.kind == tkNewline: # nested scopes delete newlines, so, we have to check
-        cursor.inc
-      elif match.node.kind in ScopedNodes: discard
-      else: break
-      continue # start new matching round
+  template astBodyRules(state: var AstState, cursor: int): untyped =
+    state.ruleAny(cursor, astIfExpr, astDef, astAssign, astExpr)
 
-  var
-    builder: PairSeqBuilder
-    cursor = start
-  let indent = s.indent
-  while true:
-    matchVariant astIfExpr
-    matchVariant astDef
-    matchVariant astAssign
-    matchVariant astExpr
-    if not s.isEnd(cursor):
-      raiseGrammarError("unexpected token " & $s[cursor].kind & " at position " & $cursor)
-    else: break
+  var builder: PairSeqBuilder
+  var match = s.astBodyRules(start)
+
+  while match.node.valid:
+    result.future = match.future
+    builder.push(s, match.node)
+    if match.node.kind notin ScopedNodes: 
+      case s[match.future].kind
+      of tkNewline: discard
+      of tkEndOfFile: break
+      of tkNewIndent:
+        if s[match.future].vUint < s.indent: break
+        elif s[match.future].vUint == s.indent: discard
+        else: raiseGrammarError("invalid indentation within body")
+      else: raiseGrammarError("unexpected token " & $s[match.future].kind & " at position " & $match.future)
+    match = s.astBodyRules(match.future + 1)
 
   if builder.node.left != EmptyIndex:
-    # debugEcho s.nodeToString(builder.node)
-    # result.node = AstNode(kind: nkBody, left: builder.node.left, right: builder.node.right)
     result.node = initAst(nkBody, builder.node.left, builder.node.right)
-    result.future = cursor
+
+func astIndent(s: var AstState, start: int): GrammarRet =
+  # Kinda hacky way to deal with trailing indents
+  if s[start].kind == tkNewIndent:
+    s.indent = s[start].vUint
+    result.node.kind = nkDontEat
+    result.future = start + 1
 
 
-const astModule* = [astBody]
+const astModule* = [astIndent, astBody]

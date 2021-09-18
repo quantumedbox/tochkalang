@@ -1,8 +1,8 @@
 ## implementation of C transpiration target
 import sem
 
-func implDef*(e: SemState, i: Id) =
+func implDef*(e: SemState, i: int) =
   ## Produce definition
 
-func implExpr*(e: SemState, i: Id) =
+func implExpr*(e: SemState, i: int) =
   ## Produce expression

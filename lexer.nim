@@ -14,6 +14,7 @@ type
   TokenKind* = enum
     tkNone,                     # Default for not triggering error by clear initialization
     tkError,                    # Signal for caller that parsing wasn't successful
+    tkEndOfFile,
     tkNewline,                  # {'\n', '\r'}
     tkNewIndent,                # Change of indentation level
     tkIdent,                    # Literal symbol
@@ -265,6 +266,7 @@ proc tokenize*(src: sink string, rules: openArray[LexDef]): Lexer =
         raise newException(LexError, "unknown token " & x.current)
   except LexError as err:
     echo "Error while lexing: ", err.msg, '\n', x.stateInfo
+  x.tokens.add Token(kind: tkEndOfFile)
   result = x
 
 

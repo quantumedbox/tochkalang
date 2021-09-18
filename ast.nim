@@ -24,7 +24,8 @@ type
   AstKind* = enum
     nkNone,
     nkError,
-    nkPair,   # Special kind for implementing lists within buffer
+    nkDontEat,  # Special non-consumable node kind
+    nkPair,     # Special kind for implementing lists within buffer
     nkIdent,
     nkKeyword,
     nkInt,
@@ -34,7 +35,7 @@ type
     nkList,
     nkAssign,
     nkDef,
-    nkIfExpr, #[ if-elif-else structure ]# nkIfBranch, nkElifBranch, nkElseBranch,
+    nkIfExpr,   #[ if-elif-else structure ]# nkElifBranch, nkElseBranch,
 
   AstNode* = object
     kind*: AstKind
@@ -63,7 +64,7 @@ type
 
 const
   EmptyIndex*: int = 0
-  ScopedNodes* = {nkBody, nkIfExpr}
+  ScopedNodes* = {nkBody}
   SequenceNodes* = {nkPair, nkBody, nkIfExpr}
 
 
@@ -79,14 +80,14 @@ func initAst*(kind: AstKind, left, right, head = 0, tail: int = 0): AstNode =
 func `[]`*(s: AstState, i: Natural): lent Token =
   if i in s.tokens.low..s.tokens.high:
     result = s.tokens[i]
-  else:
+  else: # todo: just make it panic? it might be better than such access
     result = s.tokens[0] # 0 index always has tkNone
 
 # func lastNode*(s: AstState): AstNode =
 #   s.nodes[s.nodes.high]
 
 func isEnd*(s: AstState, i: Natural): bool =
-  i >= s.tokens.len
+  s.tokens[i].kind == tkEndOfFile
 
 func emplace*(s: var AstState, n: AstNode): int =
   s.nodes.add n
@@ -116,11 +117,12 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
         if ret.node.valid:
           if ret.future <= cursor:
             raise newException(GrammarError, "infinite recursion prevented as future cursor is equal or less of present")
-          s.entries.add(s.emplace(ret.node))
+          if ret.node.kind != nkDontEat:
+            s.entries.add(s.emplace(ret.node))
           cursor = ret.future
           break
       if not ret.node.valid:
-        raise newException(GrammarError, "unknown grammar at pos " & $s.tokens[cursor].head) # todo: more helpful info
+        raise newException(GrammarError, "unknown grammar at pos " & $cursor) # todo: more helpful info
   except GrammarError as err:
     echo "Grammatical error: ", err.msg
   result = s
@@ -151,12 +153,20 @@ func `$`*(s: AstState): string =
     if e != s.entries.high:
       result.add '\n'
 
-## Rule btilities
+
+## Rule utilities
 
 func ruleAny*(s: var AstState, start: int, defs: varargs[GrammarDef]): GrammarRet {.inline.} =
   for def in defs:
     let match = s.def(start)
     if match.node.valid: return match
+
+template indentBlock*(state: var AstState, level: uint, body: untyped): untyped =
+  # ! Body should not have return
+  let backup = state.indent
+  state.indent = level
+  body
+  state.indent = backup
 
 
 ## Pair tree building utilities
