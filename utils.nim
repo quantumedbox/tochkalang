@@ -10,7 +10,7 @@ type
     cap: int
     vacant: seq[int]
 
-func push*[T](s: RetainSeq[T], v: sink T): int =
+func push*[T](s: var RetainSeq[T], v: sink T): int =
   if s.cap == s.data.len:
     let newCap = s.data.len * GrowRatio
     s.data.setLen(newCap)
@@ -29,7 +29,10 @@ func push*[T](s: RetainSeq[T], v: sink T): int =
 func `[]`*[T](s: RetainSeq[T], idx: int): lent T =
   result = s.data[idx]
 
-func erase*[T](s: RetainSeq[T], idx: int) =
+func erase*[T](s: var RetainSeq[T], idx: int) =
   s.vacant.add idx
+
+func len*[T](s: RetainSeq[T]): int =
+  s.data.len
 
 {.pop inline.}

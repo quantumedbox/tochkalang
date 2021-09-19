@@ -1,0 +1,13 @@
+name type = [1 2]
+
+name proc:
+  a: this
+  b: that =
+    test
+    if this:
+      that
+    elif that:
+      body
+    else:
+      huh
+    after

@@ -22,6 +22,8 @@ export lexer
 # todo: should all tokens store their position in source? it might be helpful for constructing
 #       some debugging information, ast trees then could infer to source range
 
+# todo: error return should be default, no need to specify it
+
 
 func lexIdent(x: Lexer): LexRet =
   if x.current.isLetter:
@@ -33,20 +35,7 @@ func lexIdent(x: Lexer): LexRet =
         if ch == ExportMarker:
           future.inc
         break
-    (x.viewToken(tkIdent, future), future)
-  else:
-    (Token(kind: tkError), 0)
-
-
-# func lexKeyword(x: Lexer): LexRet =
-#   var future: int
-#   for ch in x.stream:
-#     if not ch.isLetter: break
-#     future.inc
-#   for keyword in ReservedWords:
-#     if x.view(future) == keyword.toOpenArray(keyword.low, keyword.high):
-#       return (Token(kind: tkKeyword), future)
-#   (Token(kind: tkError), 0)
+    result = (x.viewToken(tkIdent, future), future)
 
 
 func lexKeyword(x: Lexer): LexRet =
@@ -71,8 +60,7 @@ func lexString(x: Lexer): LexRet =
       if cur == EndChar: break # no enclosing marker encountered
       future.inc
       if cur == StringMarker:
-        return (x.viewToken(tkString, future), future)
-  (Token(kind: tkError), 0)
+        result = (x.viewToken(tkString, future), future)
 
 
 func lexInt(x: Lexer): LexRet =
@@ -82,9 +70,7 @@ func lexInt(x: Lexer): LexRet =
       if ch.isNumber:
         future.inc
       else: break
-    (x.viewToken(tkInt, future), future)
-  else:
-    (Token(kind: tkError), 0)
+    result = (x.viewToken(tkInt, future), future)
 
 
 # todo: maybe create unified way of definition for all such symbols?
@@ -105,5 +91,13 @@ func lexSymbol(x: Lexer): LexRet =
   (Token(kind: kind), 1)
 
 
+func lexComment(x: Lexer): LexRet =
+  if x.current == CommentlineChar:
+    for ch in x.stream(x.cursor):
+      result.future.inc
+      if ch == '\n': break
+    result.token = Token(kind: tkComment)
+
+
 const lexValue = lexRule(lexInt, lexString)
-const lexModule* = lexRule(lexSymbol, lexKeyword, lexIdent, lexValue)
+const lexModule* = lexRule(lexComment, lexSymbol, lexKeyword, lexIdent, lexValue)

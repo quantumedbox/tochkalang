@@ -1,5 +1,7 @@
 import lexing, grammar, cimpl
 
+# todo: tests
+
 let src = stdin.readAll
 let x = tokenize(src, lexModule)
 if x.tokens.len <= 50:

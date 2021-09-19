@@ -10,6 +10,14 @@ import std/[strutils, macros]
 #       big sequence could take noticeable time for reallocation
 #       we could introduce growing parallel array structure
 
+# todo: compile-time tree of nodes for fast lookup of reserved keywords char by char
+#       we can also optimize by using arrays and indexes that correspond with characters
+#       if keywords are only in ASCII - 256 possible elems per variant shouldn't add too much
+#       non-valid variants should be 0 mem then
+
+# todo: don't use tkNone for error, just tkError is enough
+
+
 type
   TokenKind* = enum
     tkNone,                     # Default for not triggering error by clear initialization
@@ -17,6 +25,7 @@ type
     tkEndOfFile,
     tkNewline,                  # {'\n', '\r'}
     tkNewIndent,                # Change of indentation level
+    tkComment,
     tkIdent,                    # Literal symbol
     tkInt,
     tkString,
@@ -53,15 +62,17 @@ type
     # Extra hints
     initialIndent*: uint
 
-  LexRet* = tuple[tok: Token, progress: int]
+  LexRet* = tuple[token: Token, future: int]
   LexError* = object of CatchableError
-  LexDef* = proc(x: Lexer): LexRet {.nimcall, noSideEffect, raises: [LexError], gcsafe.}
+  LexDef* = proc(x: Lexer): LexRet {.nimcall, noSideEffect, raises: [LexError].}
 
 const
   EndChar* = '\0' # todo: not sure about char choise, maybe unicode has something for that
   IndentChar* = ' '
+  CommentlineChar* = '#'
   ExportMarker* = '*'
   StringMarker* = '"'
+  NonConsumingTokens* = {tkComment}
 
 
 func lexRuleUnify*(x: LexDef): seq[LexDef] = result.add x
@@ -80,19 +91,6 @@ template lexRule*(feed: varargs[seq[LexDef], lexRuleUnify]): auto =
       emplace[i] = x
     emplace
   result
-
-
-# todo: compile-time tree of nodes for fast lookup of keywords char by char
-#       we can also optimize by using arrays and indexes that correspond with characters
-#       if keywords are only in ASCII - 256 possible elems per variant shouldn't add too much
-#       non-valid variants should be 0 mem then
-type
-  KeywordTreeNode = object
-    ch: char
-    points: ptr KeywordTreeNode
-
-template push(a: KeywordTreeNode): untyped =
-  discard
 
 
 template view*(x: Lexer, future: int): auto =
@@ -152,11 +150,11 @@ func isNumber*(c: char): bool =
 
 
 func viewToken*(x: Lexer, k: TokenKind, future: int): Token =
-  Token(kind: k, head: x.cursor, tail: x.cursor + future)
+  Token(kind: k, head: x.cursor, tail: x.cursor + future - 1)
 
 
 func valid*(t: Token): bool =
-  t.kind != tkError
+  t.kind != tkError and t.kind != tkNone
 
 
 # todo: yeah, i love repeating code
@@ -257,12 +255,13 @@ proc tokenize*(src: sink string, rules: openArray[LexDef]): Lexer =
     while not x.atEnd:
       for rule in rules:
         ret = x.rule
-        if ret.tok.valid:
-          x.tokens.add ret.tok
-          x.cursor += ret.progress
+        if ret.token.valid:
+          if ret.token.kind notin NonConsumingTokens:
+            x.tokens.add ret.token
+          x.cursor += ret.future
           x.eatSpace
           break
-      if not ret.tok.valid:
+      if not ret.token.valid:
         raise newException(LexError, "unknown token " & x.current)
   except LexError as err:
     echo "Error while lexing: ", err.msg, '\n', x.stateInfo
@@ -282,9 +281,9 @@ func `$`*(x: Lexer): string =
     result.add $i
     result.add ": " # todo: line it up to certain common indentation
     result.add $token.kind
-    if token.tail - token.head != 0:
+    if token.head != 0 or token.tail != 0:
       result.add " : "
-      result.add x.source[token.head..<token.tail] # todo: print it raw?
+      result.add x.source[token.head..token.tail] # todo: print it raw?
     case token.valueKind
     of tvInt:
       result.add " : "

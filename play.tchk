@@ -23,6 +23,9 @@
 
 ]#
 
+# todo: there's problem with distinguishing definitions and calls
+#       we can roll with it and distinguish them statically and not grammatically, but dunno
+
 [] # call it constructor clause?
 this[a b] # this is object that constructs type from tuple or named tuple
 this a b  # tuple might be implied
@@ -49,9 +52,9 @@ my_func proc.string =
     "something something"
 
   cond
-  of a.valid:
+  a.valid:
     "a"
-  of b.valid:
+  b.valid:
     "b"
   else:
     "nothing"

@@ -2,6 +2,8 @@ import std/tables
 import ast, utils
 export utils
 
+# Semantic checks are implemented by annotating existing ast trees
+
 # todo: check for if-elif-else returning value on all possible paths and with right types 
 # todo: check expression types on initialization and assignments
 # todo: check for existence of identifiers within current scope

@@ -1,3 +1,4 @@
+import macros
 import lexer
 
 # todo: show more detailed information about errors and AstState
@@ -13,18 +14,17 @@ import lexer
 #       you wouldn't need calculating offset from base and bound check
 #       safety-wise it should be okay as nodes do not permanently allocate unless they're successful at which point they're static
 
-# todo: 'sequence node kinds' should act as pairs without need of incorporating pair at top level
-#       for example list and body can be 'sequence' kinds as they only store sequences of children
-
 # todo: storing everything in a single array rises a problem:
 #       big sequence could take noticeable time for reallocation
-#       we could introduce growing parallel array structure
+
+# todo: left and right sides should have some defined rules on how sides are chosen for certain cases
+
+# todo: don't use nkNone for error, just nkError is enough
 
 type
   AstKind* = enum
-    nkNone,
+    nkNone,     # Might be used for indicating no value in positional dependent lists
     nkError,
-    nkDontEat,  # Special non-consumable node kind
     nkPair,     # Special kind for implementing lists within buffer
     nkIdent,
     nkKeyword,
@@ -35,7 +35,10 @@ type
     nkList,
     nkAssign,
     nkDef,
-    nkIfExpr,   #[ if-elif-else structure ]# nkElifBranch, nkElseBranch,
+    nkIfExpr, nkElifBranch, nkElseBranch
+    nkNamedTuple, nkNamedTuplePair
+    nkCall,
+    nkInit,
 
   AstNode* = object
     kind*: AstKind
@@ -55,16 +58,16 @@ type
     tokens*: seq[Token]
     nodes*: seq[AstNode]
     # cursor*: int        # Position in tokens
-    entries*: seq[int]    # Indexes of 'nodes' that are top-most
+    entries*: seq[int]    # Indexes of 'nodes' that are top-most # todo: can actually be just first actual node
     indent*: uint
 
   GrammarRet* = tuple[node: AstNode, future: int]
   GrammarError* = object of CatchableError
-  GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError], gcsafe.}
+  GrammarDef* = proc(s: var AstState, start: int): GrammarRet {.nimcall, noSideEffect, raises: [GrammarError].}
 
 const
   EmptyIndex*: int = 0
-  ScopedNodes* = {nkBody}
+  ScopedNodes* = {nkBody, nkIfExpr}
   SequenceNodes* = {nkPair, nkBody, nkIfExpr}
 
 
@@ -93,8 +96,8 @@ func emplace*(s: var AstState, n: AstNode): int =
   s.nodes.add n
   s.nodes.high
 
-func letgo*(s: var AstState, i: Natural) =
-  s.nodes.setLen i
+# func letgo*(s: var AstState, i: Natural) =
+#   s.nodes.setLen i
 
 func valid*(n: AstNode): bool =
   n.kind != nkError and n.kind != nkNone
@@ -116,9 +119,8 @@ proc parse*(x: Lexer, rules: openArray[GrammarDef]): AstState =
         ret = s.rule(cursor)
         if ret.node.valid:
           if ret.future <= cursor:
-            raise newException(GrammarError, "infinite recursion prevented as future cursor is equal or less of present")
-          if ret.node.kind != nkDontEat:
-            s.entries.add(s.emplace(ret.node))
+            raise newException(GrammarError, "infinite recursion at " & $cursor)
+          s.entries.add(s.emplace(ret.node))
           cursor = ret.future
           break
       if not ret.node.valid:
@@ -139,9 +141,9 @@ func nodeToString*(s: AstState, n: AstNode, indent: int = 0): string =
   for i in 0..<indent:
     result.add "->"
   result.add $n.kind
-  if n.head - n.tail != 0:
+  if n.head != 0 or n.tail != 0:
     result.add " : "
-    result.add s.source[n.head..<n.tail]
+    result.add s.source[n.head..n.tail]
   result.add '\n'
   for side in [n.left, n.right]:
     if side != EmptyIndex:
@@ -156,13 +158,24 @@ func `$`*(s: AstState): string =
 
 ## Rule utilities
 
-func ruleAny*(s: var AstState, start: int, defs: varargs[GrammarDef]): GrammarRet {.inline.} =
-  for def in defs:
-    let match = s.def(start)
-    if match.node.valid: return match
+macro ruleAny*(s: var AstState, start: int, defs: openArray[GrammarDef]): untyped =
+  ## Return result of first matching rule
+  let match = ident"match" # todo: use gensym?
+  var flow = newStmtList(quote do:
+    var `match`: GrammarRet
+  )
+  let topdef = defs[^1]
+  var top = quote do: `s`.`topdef`(`start`)
+  for i in 2..defs.len:
+    let leveldef = defs[^i]
+    var level = newStmtList(newAssignment(match, quote do: `s`.`leveldef`(`start`)))
+    let ifelse = newIfStmt((newCall(ident"valid", newDotExpr(match, ident"node")), newStmtList(match)))
+    top = level.add(ifelse.add(newNimNode(nnkElse).add(top)))
+  newBlockStmt(newEmptyNode(), flow.add(top))
+
 
 template indentBlock*(state: var AstState, level: uint, body: untyped): untyped =
-  # ! Body should not have return
+  # Warn! Body should not have return
   let backup = state.indent
   state.indent = level
   body
@@ -212,6 +225,12 @@ func push*(a: var PairSeqBuilder, s: var AstState, n: sink AstNode) {.inline.} =
   else:
     s.nodes[a.bottom] = initAst(nkPair, s.emplace(s.nodes[a.bottom]), s.emplace(n))
     a.bottom = s.nodes[a.bottom].right
+
+template push*(a: var PairSeqBuilder, s: var AstState, kind: AstKind, left, right, head = 0, tail: int = 0): untyped =
+  a.push(s, initAst(kind, left, right, head, tail))
+
+template push*(a: var PairSeqBuilder, s: var AstState, kind: AstKind, n: sink AstNode): untyped =
+  a.push(s, initAst(kind, n.left, n.right, n.head, n.tail))
 
 func consumeToPairSeq*(s: var AstState, kind: AstKind, def: GrammarDef, start: int): GrammarRet =
   result.future = start
